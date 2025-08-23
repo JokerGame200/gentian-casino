@@ -12,57 +12,82 @@ use Illuminate\Support\Str;
 
 class InvitationController extends Controller
 {
-    // Gäste: Formular zur Registrierung mit Token anzeigen
+    // Formular für Registrierung per Token
     public function showRegistrationForm(string $token)
     {
-        return Inertia::render('Auth/RegisterInvite', ['token' => $token]);
+        $invite = Invitation::where('token',$token)->firstOrFail();
+        if ($invite->used_at) {
+            return redirect()->route('login')->with('error','Einladungslink bereits verwendet.');
+        }
+
+        return Inertia::render('Auth/RegisterByInvite', [
+            'token' => $invite->token,
+            'role'  => $invite->role ?? 'User',
+        ]);
     }
 
-    // Gäste: Registrierung durchführen (One-Time)
-    public function register(string $token, Request $request)
+    // Registrierung über Invite
+    public function register(Request $request, string $token)
     {
-        $data = $request->validate([
-            'username' => 'required|string|max:50|unique:users,username',
-            'password' => 'required|string|min:6|confirmed',
-        ]);
-
         $invite = Invitation::where('token',$token)->firstOrFail();
-        if ($invite->used_at) abort(410,'Link wurde bereits verwendet.');
+        abort_if($invite->used_at, 410, 'Invite bereits verwendet.');
+
+        $data = $request->validate([
+            'username' => 'required|string|min:3|max:30|unique:users,username',
+            'password' => 'required|string|min:8|confirmed',
+        ]);
 
         $user = User::create([
             'username'  => $data['username'],
             'password'  => Hash::make($data['password']),
-            'balance'   => 0,
-            'runner_id' => $invite->runner_id,
-            'email'     => null,
-            'name'      => $data['username'],
+            'runner_id' => ($invite->role === 'User') ? $invite->runner_id : null,
         ]);
-        $user->assignRole('User');
+
+        $user->assignRole($invite->role ?? 'User');
 
         $invite->used_at = now();
         $invite->save();
 
         Auth::login($user);
-        return redirect()->route('dashboard');
+        return redirect()->route('dashboard')->with('success','Konto erstellt.');
     }
 
-    // Admin/Runner: Einladungslink erzeugen
+    // Invite erzeugen (Admin & Runner)
     public function create(Request $request)
     {
-        $request->validate([
-            'runner_id' => 'nullable|exists:users,id'
+        $data = $request->validate([
+            'role'      => 'required|in:User,Runner',
+            'runner_id' => 'nullable|exists:users,id',
         ]);
 
-        $token = Str::random(48);
+        // Runner dürfen nur User-Einladungen erstellen
+        if (auth()->user()->hasRole('Runner') && $data['role'] !== 'User') {
+            return back()->withErrors(['role' => 'Runner dürfen nur User-Einladungen erstellen.']);
+        }
+
+        // Falls runner_id gesetzt: muss wirklich ein Runner sein
+        $runnerId = $data['runner_id'] ?? null;
+        if ($runnerId) {
+            $runner = User::findOrFail($runnerId);
+            if (! $runner->hasRole('Runner')) {
+                return back()->withErrors(['runner_id' => 'Ausgewählte Person ist kein Runner.']);
+            }
+        }
+
+        // Runner-Invite hat nie runner_id; User-Invite kann optional eine runner_id haben
+        $runnerIdForInvite = $data['role'] === 'User'
+            ? ($runnerId ?? (auth()->user()->hasRole('Runner') ? auth()->id() : null))
+            : null;
 
         $invite = Invitation::create([
-            'token'      => $token,
+            'token'      => Str::random(48),
             'created_by' => auth()->id(),
-            'runner_id'  => $request->runner_id
-                ?? (auth()->user()->hasRole('Runner') ? auth()->id() : null),
+            'runner_id'  => $runnerIdForInvite,
+            'role'       => $data['role'],
         ]);
 
-        return back()->with('invite_link', url('/invite/'.$invite->token));
+        return back()
+            ->with('invite_link', url('/invite/'.$invite->token))
+            ->with('success','Invite-Link erstellt.');
     }
 }
-
