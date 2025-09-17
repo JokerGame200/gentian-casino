@@ -72,6 +72,27 @@ class AdminController extends Controller
         return back()->with('success', 'Rolle aktualisiert.');
     }
 
+    public function destroy(\App\Models\User $user)
+    {
+        // Sich selbst nicht löschen
+        if ($user->id === auth()->id()) {
+            return back()->withErrors(['user' => 'Du kannst dich nicht selbst löschen.']);
+        }
+
+        // Admins hier nicht löschen
+        if ($user->hasRole('Admin')) {
+            return back()->withErrors(['user' => 'Admins können hier nicht gelöscht werden.']);
+        }
+
+        // Optional: Runner mit zugewiesenen Usern blocken
+        if ($user->hasRole('Runner') && $user->assignedUsers()->exists()) { // Relation vorhanden
+            return back()->withErrors(['user' => 'Dieser Runner hat noch zugewiesene User. Bitte zuerst umhängen.']);
+        }
+
+        $user->delete();
+        return back()->with('success', 'Benutzer gelöscht.');
+    }
+
 
 
 }

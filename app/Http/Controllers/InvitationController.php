@@ -12,6 +12,12 @@ use Illuminate\Support\Str;
 
 class InvitationController extends Controller
 {
+    public function __construct()
+    {
+        // Nur Admins dürfen Invites erzeugen; Show/Register bleiben öffentlich
+        $this->middleware(['auth','role:Admin'])->only(['create']);
+    }
+
     // Formular für Registrierung per Token
     public function showRegistrationForm(string $token)
     {
@@ -29,54 +35,53 @@ class InvitationController extends Controller
     // Registrierung über Invite
     public function register(Request $request, string $token)
     {
-        $invite = Invitation::where('token',$token)->firstOrFail();
-        abort_if($invite->used_at, 410, 'Invite bereits verwendet.');
+        $invite = Invitation::where('token', $token)->firstOrFail();
 
         $data = $request->validate([
             'username' => 'required|string|min:3|max:30|unique:users,username',
             'password' => 'required|string|min:8|confirmed',
         ]);
 
+        // User anlegen
         $user = User::create([
             'username'  => $data['username'],
+            'name'      => $data['username'], // wichtig, falls users.name NOT NULL
             'password'  => Hash::make($data['password']),
+            // Bei User-Invites Runner-Zuordnung übernehmen; bei Runner-Invites NULL
             'runner_id' => ($invite->role === 'User') ? $invite->runner_id : null,
         ]);
 
-        $user->assignRole($invite->role ?? 'User');
+        // Rolle aus Invite setzen (Default: User)
+        $role = $invite->role ?: 'User';
+        $user->assignRole($role);
 
-        $invite->used_at = now();
-        $invite->save();
+        // Invite verbrauchen
+        $invite->update(['used_at' => now()]);
 
+        // einloggen & redirect
         Auth::login($user);
-        return redirect()->route('dashboard')->with('success','Konto erstellt.');
+
+        return $user->hasRole('Runner')
+            ? redirect()->route('runner.users')->with('success', 'Willkommen! Hier sind deine zugewiesenen Nutzer.')
+            : redirect()->route('dashboard')->with('success', 'Registrierung erfolgreich.');
     }
 
-    // Invite erzeugen (Admin & Runner)
+
+
+        // Invite erzeugen (Admin & Runner)
     public function create(Request $request)
     {
+        // Defense in depth – zusätzlich zur Middleware
+        abort_unless(auth()->user()?->hasRole('Admin'), 403);
+
         $data = $request->validate([
-            'role'      => 'required|in:User,Runner',
-            'runner_id' => 'nullable|exists:users,id',
+            'role' => 'required|in:User,Runner',
+            'runner_id' => 'nullable|integer|exists:users,id',
         ]);
 
-        // Runner dürfen nur User-Einladungen erstellen
-        if (auth()->user()->hasRole('Runner') && $data['role'] !== 'User') {
-            return back()->withErrors(['role' => 'Runner dürfen nur User-Einladungen erstellen.']);
-        }
-
-        // Falls runner_id gesetzt: muss wirklich ein Runner sein
-        $runnerId = $data['runner_id'] ?? null;
-        if ($runnerId) {
-            $runner = User::findOrFail($runnerId);
-            if (! $runner->hasRole('Runner')) {
-                return back()->withErrors(['runner_id' => 'Ausgewählte Person ist kein Runner.']);
-            }
-        }
-
-        // Runner-Invite hat nie runner_id; User-Invite kann optional eine runner_id haben
+        // Nur bei User-Invites eine Runner-Zuordnung mitschicken
         $runnerIdForInvite = $data['role'] === 'User'
-            ? ($runnerId ?? (auth()->user()->hasRole('Runner') ? auth()->id() : null))
+            ? ($data['runner_id'] ?? null)
             : null;
 
         $invite = Invitation::create([
@@ -88,6 +93,7 @@ class InvitationController extends Controller
 
         return back()
             ->with('invite_link', url('/invite/'.$invite->token))
-            ->with('success','Invite-Link erstellt.');
+            ->with('success', 'Invite-Link erstellt.');
     }
+    
 }

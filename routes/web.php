@@ -63,9 +63,12 @@ Route::middleware('auth')->group(function () {
     */
     Route::middleware('role:Admin')->prefix('admin')->group(function () {
         Route::get('/users', [AdminController::class, 'index'])->name('admin.users');
+        Route::post('/invite', [InvitationController::class, 'create'])->name('admin.invite');
         Route::post('/users/{user}/assign-runner', [AdminController::class, 'assignRunner'])->name('admin.assignRunner');
         Route::post('/users/{user}/role', [AdminController::class, 'setRole'])->name('admin.setRole');
         Route::post('/users/{user}/role/set', [AdminController::class, 'updateRole'])->name('admin.setRole');
+        Route::delete('/users/{user}', [AdminController::class, 'destroy'])
+            ->name('admin.users.destroy');
 
         // Invite erstellen (hier kann Admin User- oder Runner-Invite wählen)
         Route::post('/invite', [InvitationController::class, 'create'])->name('admin.invite');
@@ -81,9 +84,6 @@ Route::middleware('auth')->group(function () {
     */
     Route::middleware('role:Runner')->prefix('runner')->group(function () {
         Route::get('/users', [RunnerController::class, 'index'])->name('runner.users');
-
-        // Invite erstellen (Runner dürfen nur User-Invites erstellen)
-        Route::post('/invite', [InvitationController::class, 'create'])->name('runner.invite');
 
         Route::get('/logs', [BalanceController::class, 'index'])->name('runner.logs');
     });

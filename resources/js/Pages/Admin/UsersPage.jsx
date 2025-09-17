@@ -1,10 +1,15 @@
 import React from 'react';
-import { useForm, router } from '@inertiajs/react';
+import { useForm, router, usePage } from '@inertiajs/react';
 
 export default function UsersPage({ users, runners = [] }) {
-  // ========== Invite-Form (wie gehabt) ==========
+  const { props } = usePage();
+  const inviteLink = props?.flash?.invite_link;
+  const flashSuccess = props?.flash?.success;
+  const flashError = props?.flash?.error;
+
+  // ========== Invite-Form ==========
   const invite = useForm({
-    role: 'User',     // Auswahl: Invite-Typ
+    role: 'User',     // Invite-Typ
     runner_id: '',    // optional: Runner für User-Invite
   });
 
@@ -15,13 +20,68 @@ export default function UsersPage({ users, runners = [] }) {
 
   const list = Array.isArray(users?.data) ? users.data : (users || []);
 
+  const copyInvite = async () => {
+    if (!inviteLink) return;
+    try {
+      await navigator.clipboard.writeText(inviteLink);
+      alert('Link in die Zwischenablage kopiert.');
+    } catch {
+      // Fallback
+      window.prompt('Zum Kopieren STRG+C benutzen:', inviteLink);
+    }
+  };
+
   return (
     <div className="space-y-8">
+      {/* Flash-Messages */}
+      {(flashSuccess || flashError || inviteLink) && (
+        <div className="space-y-2">
+          {flashSuccess && (
+            <div className="rounded border border-green-600/30 bg-green-50 px-3 py-2 text-green-700">
+              {flashSuccess}
+            </div>
+          )}
+          {flashError && (
+            <div className="rounded border border-red-600/30 bg-red-50 px-3 py-2 text-red-700">
+              {flashError}
+            </div>
+          )}
+          {inviteLink && (
+            <div className="rounded border border-blue-600/30 bg-blue-50 px-3 py-3">
+              <div className="text-sm font-semibold text-blue-800 mb-2">Invite-Link</div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  readOnly
+                  value={inviteLink}
+                  className="border rounded px-2 py-1 w-full"
+                />
+                <a
+                  href={inviteLink}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="px-2 py-1 rounded bg-blue-600 text-white"
+                >
+                  Öffnen
+                </a>
+                <button
+                  onClick={copyInvite}
+                  className="px-2 py-1 rounded border border-blue-600 text-blue-700 hover:bg-blue-600 hover:text-white"
+                >
+                  Kopieren
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Invite-Block */}
       <form onSubmit={submitInvite} className="space-y-3 border rounded p-3">
         <label className="block">
           <span className="text-sm">Einladungs-Typ</span>
           <select
+            name="role"
             value={invite.data.role}
             onChange={(e) => invite.setData('role', e.target.value)}
             className="border rounded px-2 py-1 w-full"
@@ -35,6 +95,7 @@ export default function UsersPage({ users, runners = [] }) {
           <label className="block">
             <span className="text-sm">Optional: Runner zuweisen</span>
             <select
+              name="runner_id"
               value={invite.data.runner_id || ''}
               onChange={(e) => invite.setData('runner_id', e.target.value || '')}
               className="border rounded px-2 py-1 w-full"
@@ -126,14 +187,23 @@ function UserRow({ user, runners }) {
   };
 
   // ---------- Rolle ändern ----------
-  // Achtung: Die aktuelle Rolle kommt ggf. nicht mit (Backend liefert meist nur id, username, balance, runner_id).
-  // Default auf 'User'. Wenn du die echte Rolle im UI sehen willst, gib sie im AdminController@index mit zurück.
   const roleForm = useForm({
-    role: user.role ?? 'User', // falls Backend 'role' mitgibt; sonst 'User'
+    role: user.role ?? 'User',
   });
 
   const saveRole = () => {
     roleForm.post(route('admin.setRole', user.id), { preserveScroll: true });
+  };
+
+  // ---------- User löschen ----------
+  const [deleting, setDeleting] = React.useState(false);
+  const deleteUser = () => {
+    if (!confirm(`User "${user.username}" wirklich löschen?`)) return;
+    router.delete(route('admin.users.destroy', user.id), {
+      preserveScroll: true,
+      onStart: () => setDeleting(true),
+      onFinish: () => setDeleting(false),
+    });
   };
 
   return (
@@ -145,6 +215,7 @@ function UserRow({ user, runners }) {
       <td className="p-2">
         <div className="flex items-center gap-2">
           <select
+            name="role"
             value={roleForm.data.role}
             onChange={(e) => roleForm.setData('role', e.target.value)}
             className="border rounded px-2 py-1"
@@ -167,6 +238,7 @@ function UserRow({ user, runners }) {
       <td className="p-2">
         <div className="flex items-center gap-2">
           <select
+            name="runner_id"
             value={runnerForm.data.runner_id || ''}
             onChange={(e) => runnerForm.setData('runner_id', e.target.value || '')}
             className="border rounded px-2 py-1"
@@ -189,9 +261,12 @@ function UserRow({ user, runners }) {
 
       {/* Balance */}
       <td className="p-2 font-mono">{Number(user.balance ?? 0).toFixed(2)}</td>
+
+      {/* Aktionen (nur „Speichern“ + Löschen) */}
       <td className="p-2">
         <div className="flex items-center gap-2">
           <input
+            name="amount"
             type="number"
             step="0.01"
             placeholder="Betrag"
@@ -203,20 +278,23 @@ function UserRow({ user, runners }) {
             onClick={() => doBalance('plus')}
             disabled={balanceForm.processing}
             className="px-2 py-1 rounded bg-green-600 text-white"
-            title="Guthaben erhöhen"
+            title="Guthaben speichern"
           >
-            + Hinzufügen
-          </button>
-          <button
-            onClick={() => doBalance('minus')}
-            disabled={balanceForm.processing}
-            className="px-2 py-1 rounded bg-red-600 text-white"
-            title="Guthaben verringern"
-          >
-            − Abziehen
+            Speichern
           </button>
         </div>
-        {balanceForm.errors.amount && <div className="text-red-600 text-xs mt-1">{balanceForm.errors.amount}</div>}
+
+        {/* Delete */}
+        <div className="mt-2">
+          <button
+            onClick={deleteUser}
+            disabled={deleting}
+            className="px-2 py-1 rounded border border-red-600 text-red-700 hover:bg-red-600 hover:text-white"
+            title="User löschen"
+          >
+            {deleting ? 'Löschen…' : 'Löschen'}
+          </button>
+        </div>
       </td>
     </tr>
   );

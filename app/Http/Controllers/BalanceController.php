@@ -10,46 +10,70 @@ use App\Models\BalanceLog;
 
 class BalanceController extends Controller
 {
+    /**
+     * Guthaben eines Users anpassen.
+     * - Admin: darf + und - (Betrag ≠ 0)
+     * - Runner: darf NUR + (Betrag > 0) und nur bei seinen zugewiesenen Nutzern
+     */
     public function store(Request $request, User $user)
     {
-        $data = $request->validate([
-            'amount' => 'required|numeric'
-        ]);
+        $actor = $request->user();
 
-        if (! Gate::allows('manage-user-balance', $user)) {
-            abort(403,'Nicht erlaubt.');
+        // 1) Zugriff prüfen (Admin = alle, Runner = nur eigene runner_id)
+        Gate::authorize('manage-user-balance', $user);
+
+        // 2) Validierung: Runner nur > 0, Admin jede Zahl ≠ 0
+        $rules = ['amount' => ['required', 'numeric']];
+        if ($actor->hasRole('Runner')) {
+            $rules['amount'][] = 'gt:0';
+        }
+        $data = $request->validate($rules);
+
+        $amount = (float) $data['amount'];
+        if (!$actor->hasRole('Runner') && $amount == 0.0) {
+            return back()->withErrors(['amount' => 'Betrag darf nicht 0 sein.']);
         }
 
-        DB::transaction(function() use ($user,$data) {
-            $user->balance = (float)$user->balance + (float)$data['amount'];
+        // 3) Änderung + Log in einer Transaktion
+        DB::transaction(function () use ($actor, $user, $amount) {
+            $user->balance = ($user->balance ?? 0) + $amount;
             $user->save();
 
             BalanceLog::create([
-                'from_user_id' => auth()->id(),
+                'from_user_id' => $actor->id,
                 'to_user_id'   => $user->id,
-                'amount'       => $data['amount'],
+                'amount'       => $amount, // negativ = Abzug (nur Admin möglich)
             ]);
         });
 
-        return back()->with('success','Guthaben aktualisiert.');
+        return back()->with('success', 'Guthaben aktualisiert.');
     }
 
-    public function index()
+    /**
+     * (Optional) Logs-Übersicht für Admin/Runner.
+     * Runner sieht nur Logs seiner zugewiesenen Nutzer.
+     * Passe den Inertia-View-Namen bei Bedarf an.
+     */
+    public function logs(Request $request)
     {
-        $actor = auth()->user();
+        $actor = $request->user();
+
+        // Admin & Runner dürfen rein; andere nicht
+        if (! $actor->hasRole('Admin') && ! $actor->hasRole('Runner')) {
+            abort(403);
+        }
 
         $q = BalanceLog::query()->with([
             'fromUser:id,username',
-            'toUser:id,username,runner_id'
+            'toUser:id,username,runner_id',
         ]);
 
         if ($actor->hasRole('Runner')) {
-            $q->whereHas('toUser', fn($qq)=>$qq->where('runner_id',$actor->id));
+            $q->whereHas('toUser', fn ($qq) => $qq->where('runner_id', $actor->id));
         }
 
         $logs = $q->latest('created_at')->paginate(25);
-        // Benenne die Inertia-Seite so, wie du sie anlegst:
-        return inertia('AdminOrRunner/LogsPage', ['logs'=>$logs]);
+
+        return inertia('AdminOrRunner/LogsPage', ['logs' => $logs]);
     }
 }
-
