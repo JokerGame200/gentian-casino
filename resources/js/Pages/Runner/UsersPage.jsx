@@ -1,13 +1,17 @@
 import React from 'react';
 import { useForm, router, usePage } from '@inertiajs/react';
+import { useInertiaAutoRefresh } from '@/hooks/useInertiaAutoRefresh';
 
 export default function RunnerUsersPage({ users }) {
+  // 🔄 Alle 4s NUR die Users-Prop aktualisieren:
+  useInertiaAutoRefresh(['users'], 4000);
+
   const { props } = usePage();
   const flashSuccess = props?.flash?.success;
   const flashError = props?.flash?.error;
 
   const list = Array.isArray(users?.data) ? users.data : (users || []);
-
+  
   return (
     <div className="space-y-6">
       <h1 className="text-xl font-semibold">Meine Nutzer</h1>
@@ -77,8 +81,10 @@ function UserRow({ user }) {
           <input
             name="amount"
             type="number"
+            min="0.01"
+            max="500"
             step="0.01"
-            placeholder="Betrag (+/-)"
+            placeholder="Betrag (+, max. 500€)"
             value={form.data.amount}
             onChange={(e) => form.setData('amount', e.target.value)}
             className="border rounded px-2 py-1 w-28"

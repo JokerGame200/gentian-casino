@@ -1,12 +1,14 @@
 import React from 'react';
 import { useForm, router, usePage } from '@inertiajs/react';
+import { useInertiaAutoRefresh } from '@/hooks/useInertiaAutoRefresh';
 
 export default function UsersPage({ users, runners = [] }) {
+  useInertiaAutoRefresh(['users'], 4000);
   const { props } = usePage();
   const inviteLink = props?.flash?.invite_link;
   const flashSuccess = props?.flash?.success;
   const flashError = props?.flash?.error;
-
+  
   // ========== Invite-Form ==========
   const invite = useForm({
     role: 'User',     // Invite-Typ

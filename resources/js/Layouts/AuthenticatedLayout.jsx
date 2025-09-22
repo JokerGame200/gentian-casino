@@ -1,9 +1,12 @@
 import React from "react";
 import { Link, usePage } from "@inertiajs/react";
+import { useMyBalance } from '@/hooks/useMyBalance';
 
 export default function AuthenticatedLayout({ header, children }) {
-  const { auth } = usePage().props;
-  const roles = (auth?.user?.roles ?? []);
+  const liveBalance = useMyBalance(2000);
+  const { auth } = usePage().props;              // ← hol alles aus Inertia
+  const roles = auth?.user?.roles ?? [];
+  const safeBalance = Number(auth?.user?.balance ?? 0);
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -12,6 +15,14 @@ export default function AuthenticatedLayout({ header, children }) {
           <div className="flex items-center gap-4">
             <Link href={route('dashboard')} className="font-semibold">Next2Win</Link>
 
+            {/* Kopfbereich + Live-Balance */}
+            <div className="ml-4">
+              <div className="ml-auto font-mono">
+                Balance: {(liveBalance !== null ? liveBalance : safeBalance).toFixed(2)}
+              </div>
+            </div>
+
+            {/* Admin-Links */}
             {roles.includes('Admin') && (
               <>
                 <Link href={route('admin.users')} className="text-sm text-gray-700 hover:underline">
@@ -23,6 +34,7 @@ export default function AuthenticatedLayout({ header, children }) {
               </>
             )}
 
+            {/* Runner-Links */}
             {roles.includes('Runner') && (
               <>
                 <Link href={route('runner.users')} className="text-sm text-gray-700 hover:underline">
@@ -39,12 +51,7 @@ export default function AuthenticatedLayout({ header, children }) {
             <span className="text-sm text-gray-600">
               {auth?.user?.username} {roles.length ? `(${roles[0]})` : ''}
             </span>
-            <Link
-              href={route('logout')}
-              method="post"
-              as="button"
-              className="text-sm text-red-600 hover:underline"
-            >
+            <Link href={route('logout')} method="post" as="button" className="text-sm text-red-600 hover:underline">
               Logout
             </Link>
           </div>
@@ -53,9 +60,7 @@ export default function AuthenticatedLayout({ header, children }) {
 
       {header && (
         <header className="bg-white shadow">
-          <div className="mx-auto max-w-7xl py-6 px-4">
-            {header}
-          </div>
+          <div className="mx-auto max-w-7xl py-6 px-4">{header}</div>
         </header>
       )}
 

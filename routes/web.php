@@ -56,6 +56,8 @@ Route::middleware('auth')->group(function () {
     Route::patch('/profile',[ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile',[ProfileController::class, 'destroy'])->name('profile.destroy');
 
+    Route::get('/api/balance/me', [\App\Http\Controllers\BalanceController::class, 'me'])->name('balance.me');
+
     /*
     |--------------------------------------------------------------------------
     | Admin-Bereich

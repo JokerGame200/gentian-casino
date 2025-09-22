@@ -12,11 +12,6 @@ use Illuminate\Support\Str;
 
 class InvitationController extends Controller
 {
-    public function __construct()
-    {
-        // Nur Admins dürfen Invites erzeugen; Show/Register bleiben öffentlich
-        $this->middleware(['auth','role:Admin'])->only(['create']);
-    }
 
     // Formular für Registrierung per Token
     public function showRegistrationForm(string $token)
