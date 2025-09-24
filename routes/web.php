@@ -1,5 +1,6 @@
 <?php
 
+use Inertia\Inertia;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\{
     AdminController,
@@ -42,6 +43,10 @@ Route::middleware('guest')->group(function () {
 |--------------------------------------------------------------------------
 */
 Route::middleware('auth')->group(function () {
+
+    // Games and Exit
+    Route::get('/games', fn()=> Inertia::render('Games/Lobby'))->middleware('auth')->name('games.lobby');
+    Route::view('/close.php', 'games/close')->name('games.exit');
 
     // Dashboard: Rolle entscheidet über Zielseite
     Route::get('/dashboard', function () {
