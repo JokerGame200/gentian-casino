@@ -3,7 +3,7 @@
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\{
-    AdminController, RunnerController, BalanceController, InvitationController, ProfileController
+    AdminController, RunnerController, BalanceController, AvatarController, InvitationController, ProfileController
 };
 
 // Root -> Login / Welcome
@@ -30,7 +30,8 @@ Route::middleware('auth')->group(function () {
     Route::get('/profile',  [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile',[ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile',[ProfileController::class, 'destroy'])->name('profile.destroy');
-
+    Route::get('/avatar/placeholder', [AvatarController::class, 'placeholder'])
+        ->name('avatar.placeholder');
     Route::get('/api/balance/me', [BalanceController::class, 'me'])->name('balance.me');
 
     // ---------- ADMIN ----------
