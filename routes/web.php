@@ -3,105 +3,79 @@
 use Inertia\Inertia;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\{
-    AdminController,
-    RunnerController,
-    BalanceController,
-    InvitationController,
-    ProfileController
+    AdminController, RunnerController, BalanceController, InvitationController, ProfileController
 };
 
-// Root -> Login oder Dashboard
+// Root -> Login / Welcome
 Route::get('/', fn () => auth()->check()
-    ? redirect()->route('dashboard')
-    : redirect()->route('login')
-);
+    ? redirect()->route('welcome')
+    : redirect()->route('login'));
 
-// Breeze/Auth-Routen (Login, Register, Password, etc.)
-require __DIR__ . '/auth.php';
+require __DIR__.'/auth.php';
 
-/*
-|--------------------------------------------------------------------------
-| Gäste: Registrierung über Einladungslink
-| - invite_token Middleware validiert den Token (EnsureValidInviteToken)
-|--------------------------------------------------------------------------
-*/
+// Gäste: Invite
 Route::middleware('guest')->group(function () {
-    // Formular anzeigen
     Route::get('/invite/{token}', [InvitationController::class, 'showRegistrationForm'])
-        ->middleware('invite_token')
-        ->name('invite.show');
-
-    // Registrierung absenden
+        ->middleware('invite_token')->name('invite.show');
     Route::post('/invite/{token}', [InvitationController::class, 'register'])
-        ->middleware('invite_token')
-        ->name('invite.register');
+        ->middleware('invite_token')->name('invite.register');
 });
 
-/*
-|--------------------------------------------------------------------------
-| Authentifiziert
-|--------------------------------------------------------------------------
-*/
+// Auth
 Route::middleware('auth')->group(function () {
-
-    // Games and Exit
-    Route::get('/games', fn()=> Inertia::render('Games/Lobby'))->middleware('auth')->name('games.lobby');
+    Route::get('/games', fn()=> Inertia::render('Games/Lobby'))->name('games.lobby');
     Route::view('/close.php', 'games/close')->name('games.exit');
 
-    // Dashboard: Rolle entscheidet über Zielseite
-    Route::get('/dashboard', function () {
-        $u = auth()->user();
-        if ($u->hasRole('Admin'))  return redirect()->route('admin.users');
-        if ($u->hasRole('Runner')) return redirect()->route('runner.users');
-        return inertia('Dashboard'); // einfache User-Seite
-    })->name('dashboard');
-
-    // --- Breeze Profil-Routen (fix für Ziggy: profile.edit etc.) ---
+    // Breeze Profile
     Route::get('/profile',  [ProfileController::class, 'edit'])->name('profile.edit');
     Route::patch('/profile',[ProfileController::class, 'update'])->name('profile.update');
     Route::delete('/profile',[ProfileController::class, 'destroy'])->name('profile.destroy');
 
-    Route::get('/api/balance/me', [\App\Http\Controllers\BalanceController::class, 'me'])->name('balance.me');
+    Route::get('/api/balance/me', [BalanceController::class, 'me'])->name('balance.me');
 
-    /*
-    |--------------------------------------------------------------------------
-    | Admin-Bereich
-    |--------------------------------------------------------------------------
-    */
-    Route::middleware('role:Admin')->prefix('admin')->group(function () {
-        Route::get('/users', [AdminController::class, 'index'])->name('admin.users');
-        Route::post('/invite', [InvitationController::class, 'create'])->name('admin.invite');
-        Route::post('/users/{user}/assign-runner', [AdminController::class, 'assignRunner'])->name('admin.assignRunner');
-        Route::post('/users/{user}/role', [AdminController::class, 'setRole'])->name('admin.setRole');
-        Route::post('/users/{user}/role/set', [AdminController::class, 'updateRole'])->name('admin.setRole');
-        Route::delete('/users/{user}', [AdminController::class, 'destroy'])
-            ->name('admin.users.destroy');
+    // ---------- ADMIN ----------
+    Route::middleware('role:Admin')->prefix('admin')->name('admin.')->group(function () {
+        // NEU: Haupt-Panel unter /admin
+        Route::get('/', [AdminController::class, 'index'])->name('index');
 
-        // Invite erstellen (hier kann Admin User- oder Runner-Invite wählen)
-        Route::post('/invite', [InvitationController::class, 'create'])->name('admin.invite');
+        // Kompatibilität: /admin/users zeigt auf dasselbe Panel
+        Route::get('/users', [AdminController::class, 'index'])->name('users');
 
-        // Logs einsehen (gleiche Action wie Runner, aber separater Name)
-        Route::get('/logs', [BalanceController::class, 'index'])->name('admin.logs');
+        // Invite (bleibt bei deinem InvitationController)
+        Route::post('/invite', [InvitationController::class, 'create'])->name('invite');
+
+        // Runner-Zuordnung (wie gehabt)
+        Route::post('/users/{user}/assign-runner', [AdminController::class, 'assignRunner'])->name('assignRunner');
+
+        // BEREINIGT: nur noch diese Rollen-Route + Name, passt zur UsersPage.jsx
+        Route::post('/users/{user}/role/set', [AdminController::class, 'setRole'])->name('setRole');
+
+        // Benutzer löschen
+        Route::delete('/users/{user}', [AdminController::class, 'destroy'])->name('users.destroy');
+
+        // Separate Logs-Seite (optional weiterhin erreichbar)
+        Route::get('/logs', [BalanceController::class, 'index'])->name('logs');
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Runner-Bereich
-    |--------------------------------------------------------------------------
-    */
-    Route::middleware('role:Runner')->prefix('runner')->group(function () {
-        Route::get('/users', [RunnerController::class, 'index'])->name('runner.users');
-
-        Route::get('/logs', [BalanceController::class, 'index'])->name('runner.logs');
+    // ---------- RUNNER ----------
+    Route::middleware('role:Runner')->prefix('runner')->name('runner.')->group(function () {
+        Route::get('/users', [RunnerController::class, 'index'])->name('users');
+        Route::get('/logs', [BalanceController::class, 'index'])->name('logs');
     });
 
-    /*
-    |--------------------------------------------------------------------------
-    | Guthaben ändern (nur Admin oder Runner)
-    | Gate/Controller prüft, ob Zieluser zulässig ist.
-    |--------------------------------------------------------------------------
-    */
+    // Balance (Admin|Runner)
     Route::post('/users/{user}/balance', [BalanceController::class, 'store'])
-        ->middleware('role:Admin|Runner')
-        ->name('balance.update');
+        ->middleware('role:Admin|Runner')->name('balance.update');
+
+    // Welcome & Dashboard (verifiziert)
+    Route::middleware('verified')->group(function () {
+        Route::get('/welcome', fn () => Inertia::render('Welcome'))->name('welcome');
+
+        Route::get('/dashboard', function () {
+            $user = auth()->user();
+            if ($user->hasRole('Admin'))  return redirect()->route('admin.index'); // angepasst
+            if ($user->hasRole('Runner')) return redirect()->route('runner.users');
+            return Inertia::render('Dashboard');
+        })->name('dashboard');
+    });
 });

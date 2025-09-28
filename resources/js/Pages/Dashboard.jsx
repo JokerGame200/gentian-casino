@@ -1,8 +1,4 @@
-"use client"
-
-import { useEffect, useMemo, useRef, useState } from "react"
-import Head from "next/head"
-import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout"
+import React, { useEffect, useMemo, useRef, useState } from 'react';import { Head } from '@inertiajs/react';import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout"
 
 export default function Dashboard() {
   const user = {
