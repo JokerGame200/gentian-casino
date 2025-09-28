@@ -5,206 +5,177 @@ namespace App\Http\Controllers;
 use App\Models\User;
 use App\Models\BalanceLog;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Validation\Rule;
 use Inertia\Inertia;
 
 class AdminController extends Controller
 {
     /**
-     * Admin-Panel (UsersPage)
-     * Liefert: users, runners, stats, logs (gleich wie /admin/logs)
+     * Admin: Users-Übersicht + Runners + kompakte KPIs + Logs
      */
     public function index(Request $request)
     {
-        $auth = Auth::user();
+        // --- Users (mit Limits-Feldern fürs Admin-Panel) ---
+        $users = User::query()
+            ->with(['runner:id,username', 'roles:id,name'])
+            ->select([
+                'id',
+                'username',
+                'name',
+                'balance',
+                'currency',
+                'runner_id',
+                'runner_daily_limit',
+                'runner_per_user_limit',
+            ])
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->through(function (User $u) {
+                // Rolle: Spatie zuerst, Fallback auf evtl. role-Spalte
+                $role = optional($u->roles->first())->name ?? ($u->role ?? 'User');
 
-        // KPIs für heute
-        $start = now()->startOfDay();
-        $end   = now()->endOfDay();
+                return [
+                    'id'                     => $u->id,
+                    'username'               => $u->username,
+                    'name'                   => $u->name,
+                    'balance'                => (float) ($u->balance ?? 0),
+                    'currency'               => $u->currency ?? 'EUR',
+                    'runner_id'              => $u->runner_id,
+                    'role'                   => $role,
+                    'runner_daily_limit'     => (float) ($u->runner_daily_limit ?? 1000),
+                    'runner_per_user_limit'  => (float) ($u->runner_per_user_limit ?? 500),
+                ];
+            })
+            ->withQueryString();
 
-        // Summe heutiger Einzahlungen (kind = 'deposit')
-        $depositsToday = (float) BalanceLog::whereBetween('created_at', [$start, $end])
-            ->where('kind', 'deposit')
-            ->sum('amount');
+        // --- Runners (für Zuweisungen & Limits-Editor) ---
+        $runners = User::query()
+            ->with('roles:id,name')
+            ->select(['id', 'username', 'name', 'runner_daily_limit', 'runner_per_user_limit'])
+            ->get()
+            ->filter(function (User $u) {
+                // "Runner" via Spatie oder role-Spalte
+                $isRunner = (method_exists($u, 'hasRole') && $u->hasRole('Runner')) || (($u->role ?? null) === 'Runner');
+                return $isRunner;
+            })
+            ->values()
+            ->map(function (User $u) {
+                return [
+                    'id'                    => $u->id,
+                    'username'              => $u->username ?? $u->name ?? ('#'.$u->id),
+                    'runner_daily_limit'    => (float) ($u->runner_daily_limit ?? 1000),
+                    'runner_per_user_limit' => (float) ($u->runner_per_user_limit ?? 500),
+                ];
+            });
 
-        // GGR = Stakes - Winnings
-        // Annahme: bet = Einsatz (negativ gespeichert), win = Gewinn (positiv)
-        $stakes = (float) BalanceLog::whereBetween('created_at', [$start, $end])
-            ->where('kind', 'bet')
-            ->sum(DB::raw('ABS(amount)'));
-        $wins   = (float) BalanceLog::whereBetween('created_at', [$start, $end])
-            ->where('kind', 'win')
-            ->sum('amount');
-        $ggrToday = $stakes - $wins;
+        // --- KPIs (leichtgewichtig) ---
+        $stats = [
+            'users'          => (int) (User::count()),
+            'runners'        => (int) ($runners->count()),
+            'deposits_today' => (float) BalanceLog::query()
+                                    ->where('amount', '>', 0)
+                                    ->where('created_at', '>=', now()->startOfDay())
+                                    ->sum('amount'),
+            // Optional/Beispiel: negatives als "GGR (today)" interpretieren
+            'ggr_today'      => (float) abs(BalanceLog::query()
+                                    ->where('amount', '<', 0)
+                                    ->where('created_at', '>=', now()->startOfDay())
+                                    ->sum('amount')),
+        ];
 
-        return Inertia::render('Admin/UsersPage', [
-            // Nutzerliste
-            'users' => fn () =>
-                User::with(['runner:id,username', 'roles:id,name'])
-                    ->select('id', 'username', 'name', 'balance', 'runner_id')
-                    ->orderByDesc('id')
-                    ->paginate(25)
-                    ->through(function (User $u) {
-                        return [
-                            'id'        => $u->id,
-                            'username'  => $u->username,
-                            'name'      => $u->name,
-                            'balance'   => (float) ($u->balance ?? 0),
-                            'runner_id' => $u->runner_id,
-                            'role'      => optional($u->roles->first())->name ?? 'User',
-                        ];
-                    })
-                    ->withQueryString(),
-
-            // Runner-Auswahl
-            'runners' => fn () =>
-                User::whereHas('roles', fn ($q) => $q->where('name', 'Runner'))
-                    ->orderBy('username')
-                    ->get(['id', 'username']),
-
-            // KPIs
-            'stats' => [
-                'users'          => User::count(),
-                'runners'        => User::whereHas('roles', fn($q)=>$q->where('name','Runner'))->count(),
-                'deposits_today' => $depositsToday,
-                'ggr_today'      => $ggrToday,
-            ],
-
-            // Logs (gleiches Dataset wie /admin/logs), als Closure für Partial Reload
-            'logs' => fn () => $this->logsQuery($auth)
-                ->paginate(50)
-                ->through(function (BalanceLog $l) {
-                    return [
-                        'id'         => $l->id,
-                        'created_at' => optional($l->created_at)->toIso8601String() ?? (string) $l->created_at,
-                        'amount'     => (float) $l->amount,
-                        'from_user'  => ['id' => $l->from_user_id, 'username' => optional($l->fromUser)->username],
-                        'to_user'    => ['id' => $l->to_user_id,   'username' => optional($l->toUser)->username],
-                    ];
-                })
-                ->withQueryString(),
-        ]);
-    }
-
-    /**
-     * Basis-Query für Logs; Runner sehen nur relevante Logs.
-     */
-    protected function logsQuery(?User $auth)
-    {
-        $q = BalanceLog::with([
+        // --- Logs kompakt (für Tab "Logs" im Admin-Panel) ---
+        $logs = BalanceLog::query()
+            ->with([
                 'fromUser:id,username',
                 'toUser:id,username',
             ])
-            ->orderByDesc('created_at')
-            ->orderByDesc('id');
+            ->orderByDesc('id')
+            ->paginate(25)
+            ->through(function (BalanceLog $log) {
+                return [
+                    'id'         => $log->id,
+                    'from_user'  => [
+                        'id'       => $log->from_user_id,
+                        'username' => optional($log->fromUser)->username,
+                    ],
+                    'to_user'    => [
+                        'id'       => $log->to_user_id,
+                        'username' => optional($log->toUser)->username,
+                    ],
+                    'amount'     => (float) $log->amount,
+                    'created_at' => optional($log->created_at)->toIso8601String(),
+                ];
+            })
+            ->withQueryString();
 
-        if ($auth && method_exists($auth, 'hasRole') && $auth->hasRole('Runner')) {
-            if (method_exists($auth, 'assignedUsers')) {
-                $ids = $auth->assignedUsers()->pluck('id')->push($auth->id)->unique()->values();
-                $q->where(function ($w) use ($ids) {
-                    $w->whereIn('from_user_id', $ids)->orWhereIn('to_user_id', $ids);
-                });
-            } else {
-                $q->where(function ($w) use ($auth) {
-                    $w->where('from_user_id', $auth->id)->orWhere('to_user_id', $auth->id);
-                });
+        return Inertia::render('Admin/UsersPage', [
+            'users'   => $users,
+            'runners' => $runners,
+            'stats'   => $stats,
+            'logs'    => $logs,
+        ]);
+    }
+
+    /**
+     * Rolle setzen (Spatie + optionale role-Spalte synchron halten).
+     */
+    public function setRole(Request $request, User $user)
+    {
+        $data = $request->validate([
+            'role' => ['required', Rule::in(['User', 'Runner', 'Admin'])],
+        ]);
+        $role = $data['role'];
+
+        // Spatie-Rolle(n) setzen (falls installiert)
+        if (method_exists($user, 'syncRoles')) {
+            $user->syncRoles([$role]);
+        }
+
+        // Falls du zusätzlich eine role-Spalte pflegst, spiegeln:
+        if (schema_has_column('users', 'role')) {
+            $user->role = $role;
+            $user->save();
+        }
+
+        return back()->with('success', "Rolle aktualisiert: {$role}");
+    }
+
+    /**
+     * Runner für einen User zuweisen/entfernen.
+     */
+    public function assignRunner(Request $request, User $user)
+    {
+        $data = $request->validate([
+            'runner_id' => ['nullable', 'integer', 'exists:users,id'],
+        ]);
+
+        $runnerId = $data['runner_id'] ?? null;
+
+        if ($runnerId) {
+            $runner = User::findOrFail($runnerId);
+            $isRunner = (method_exists($runner, 'hasRole') && $runner->hasRole('Runner'))
+                     || (($runner->role ?? null) === 'Runner');
+
+            if (!$isRunner) {
+                return back()->with('error', 'Der gewählte Betreuer ist kein Runner.');
             }
         }
 
-        return $q;
-    }
-
-    /**
-     * Rolle setzen (Spatie oder Fallback)
-     */
-    public function setRole(User $user, Request $request)
-    {
-        $data = $request->validate([
-            'role' => 'required|in:User,Runner,Admin',
-        ]);
-
-        if (method_exists($user, 'syncRoles')) {
-            $user->syncRoles([$data['role']]);
-        } else {
-            $user->role = $data['role'];
-            $user->save();
-        }
-
-        return back()->with('success', 'Rolle aktualisiert.');
-    }
-
-    /**
-     * Runner zuweisen/entfernen
-     */
-    public function assignRunner(User $user, Request $request)
-    {
-        $request->validate([
-            'runner_id' => 'nullable|exists:users,id',
-        ]);
-
-        $runner = $request->runner_id ? User::findOrFail($request->runner_id) : null;
-
-        if ($runner && method_exists($runner, 'hasRole') && ! $runner->hasRole('Runner')) {
-            return back()->withErrors(['runner_id' => 'Ausgewählte Person ist kein Runner.']);
-        }
-
-        $user->runner_id = $runner?->id;
+        $user->runner_id = $runnerId;
         $user->save();
 
-        return back()->with('success', 'Runner-Zuordnung gespeichert.');
+        return back()->with('success', 'Runner-Zuweisung aktualisiert.');
     }
 
     /**
-     * Balance anpassen + Log schreiben
-     * ✱ Verwenden, falls du balance.update auf AdminController routest.
-     */
-    public function updateBalance(User $user, Request $request)
-    {
-        $data = $request->validate([
-            'amount' => 'required|numeric',
-        ]);
-
-        $amount = (float) $data['amount'];
-        $actor  = Auth::user();
-
-        DB::transaction(function () use ($user, $amount, $actor) {
-            // Balance updaten
-            $user->balance = (float) ($user->balance ?? 0) + $amount;
-            $user->save();
-
-            // Log schreiben
-            $log = new BalanceLog([
-                'from_user_id' => optional($actor)->id,
-                'to_user_id'   => $user->id,
-                'amount'       => $amount,
-                'kind'         => $amount >= 0 ? 'deposit' : 'withdrawal',
-            ]);
-
-            // created_at manuell setzen (Model hat $timestamps=false)
-            $log->created_at = now();
-            $log->save();
-        });
-
-        return back()->with('success', 'Balance aktualisiert.');
-    }
-
-    /**
-     * Benutzer löschen
+     * User löschen (einfach/naiv; nach Bedarf härten).
      */
     public function destroy(User $user)
     {
-        $me = Auth::id();
-
-        if ((int) $user->id === (int) $me) {
-            return back()->withErrors(['user' => 'Du kannst dich nicht selbst löschen.']);
-        }
-
-        if (method_exists($user, 'hasRole') && $user->hasRole('Runner') && method_exists($user, 'assignedUsers')) {
-            if ($user->assignedUsers()->exists()) {
-                return back()->withErrors(['user' => 'Dieser Runner hat noch zugewiesene User. Bitte zuerst umhängen.']);
-            }
+        // Optional: Schutz, z. B. Admins nicht löschen, sich selbst nicht löschen, etc.
+        if ((method_exists($user, 'hasRole') && $user->hasRole('Admin')) || (($user->role ?? null) === 'Admin')) {
+            return back()->with('error', 'Admin-Konten können hier nicht gelöscht werden.');
         }
 
         $user->delete();
@@ -213,18 +184,54 @@ class AdminController extends Controller
     }
 
     /**
-     * (Optional) Invite erzeugen — einfacher Flash-Link.
+     * NEU: Limits für Runner speichern.
+     * Route: POST /admin/runners/{runner}/limits  (name: admin.runners.updateLimits)
      */
-    public function invite(Request $request)
+    public function updateRunnerLimits(Request $request, User $runner)
     {
+        // Ziel muss wirklich ein Runner sein (Spatie oder role-Spalte)
+        $isRunner = (method_exists($runner, 'hasRole') && $runner->hasRole('Runner'))
+                || (($runner->role ?? null) === 'Runner');
+
+        if (!$isRunner) {
+            return back(303)->withErrors([
+                'runner_daily_limit' => 'Limits können nur für Runner gesetzt werden.',
+            ])->withInput();
+        }
+
         $data = $request->validate([
-            'role'      => 'required|in:User,Runner',
-            'runner_id' => 'nullable|exists:users,id',
+            'runner_daily_limit'    => ['required','numeric','min:0','max:1000000'],
+            'runner_per_user_limit' => ['required','numeric','min:0','max:1000000'],
         ]);
 
-        $token = Str::upper(Str::random(10));
-        $url = url('/invite/' . $token);
+        // (Optional) Logik: pro-User <= daily
+        if ($data['runner_per_user_limit'] > $data['runner_daily_limit']) {
+            return back(303)->withErrors([
+                'runner_per_user_limit' => 'Das Pro-User/Tag-Limit darf das Tageslimit nicht überschreiten.',
+            ])->withInput();
+        }
 
-        return back()->with('success', "Invite erstellt: {$url}");
+        // Explizit zuweisen -> unabhängig von $fillable
+        $runner->runner_daily_limit    = $data['runner_daily_limit'];
+        $runner->runner_per_user_limit = $data['runner_per_user_limit'];
+        $runner->save();
+
+        return back(303)->with('success', 'Runner-Limits aktualisiert.');
+    }
+
+}
+
+/**
+ * Kleines Helper, um robust zu prüfen, ob eine Spalte existiert, ohne Import der Schema-Facade überall.
+ * (Vermeidet Fehler, falls du keine zusätzliche role-Spalte nutzt.)
+ */
+if (!function_exists('schema_has_column')) {
+    function schema_has_column(string $table, string $column): bool
+    {
+        try {
+            return \Illuminate\Support\Facades\Schema::hasColumn($table, $column);
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 }

@@ -23,6 +23,79 @@ class BalanceController extends Controller
         ]);
     }
 
+    public function update(Request $request, User $user)
+    {
+        $actor = Auth::user();
+
+        $data = $request->validate([
+            'amount' => ['required','numeric'],
+        ]);
+
+        $amount = round((float) $data['amount'], 2);
+
+        // ==== Runner erkennen (Spatie ODER role-Spalte) ====
+        $isRunner = (method_exists($actor, 'hasRole') && $actor->hasRole('Runner'))
+                || (($actor->role ?? null) === 'Runner');
+
+        if ($isRunner) {
+            // nur zugewiesene User
+            if ((int)($user->runner_id ?? 0) !== (int)$actor->id) {
+                return back()->with('error', 'Dieser User ist dir nicht zugewiesen.');
+            }
+            // nur gutschreiben
+            if ($amount <= 0) {
+                return back()->with('error', 'Runner dürfen hier nur Guthaben hinzufügen (positiver Betrag).');
+            }
+
+            $perUserLimit = (float)($actor->runner_per_user_limit ?? 500);
+            $dailyLimit   = (float)($actor->runner_daily_limit ?? 1000);
+
+            $todayStart = now()->startOfDay();
+
+            $givenTodayTotal = (float) \App\Models\BalanceLog::query()
+                ->where('from_user_id', $actor->id)
+                ->where('created_at', '>=', $todayStart)
+                ->where('amount', '>', 0)
+                ->sum('amount');
+
+            $givenTodayToThisUser = (float) \App\Models\BalanceLog::query()
+                ->where('from_user_id', $actor->id)
+                ->where('to_user_id', $user->id)
+                ->where('created_at', '>=', $todayStart)
+                ->where('amount', '>', 0)
+                ->sum('amount');
+
+            $remainingDay     = max(0, $dailyLimit - $givenTodayTotal);
+            $remainingPerUser = max(0, $perUserLimit - $givenTodayToThisUser);
+            $maxAllowed       = min($remainingDay, $remainingPerUser);
+
+            if ($remainingDay <= 0) {
+                return back()->with('error', 'Tageslimit erreicht.');
+            }
+            if ($remainingPerUser <= 0) {
+                return back()->with('error', 'User-Tageslimit erreicht.');
+            }
+            if ($amount > $maxAllowed + 1e-6) {
+                return back()->with('error', 'Maximal heute noch zulässig: ' . number_format($maxAllowed, 2, ',', '.') . ' €.');
+            }
+        }
+
+        DB::transaction(function () use ($actor, $user, $amount) {
+            $user->increment('balance', $amount);
+
+            \App\Models\BalanceLog::create([
+                'from_user_id' => $actor->id,
+                'to_user_id'   => $user->id,
+                'amount'       => $amount,
+                // WICHTIG, weil $timestamps=false im Model:
+                'created_at'   => now(),
+                // optional: 'kind' => 'runner_topup',
+            ]);
+        });
+
+        return back()->with('success', 'Balance aktualisiert.');
+    }
+
     /**
      * POST balance.update => /users/{user}/balance
      * Setzt 'kind' + 'created_at', damit Deposits/GGR-Auswertung funktioniert.

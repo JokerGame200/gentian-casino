@@ -1,10 +1,9 @@
-// resources/js/Pages/Dashboard.jsx
+// resources/js/Pages/Welcome.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Head, usePage, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 
 const HIDE_SCROLLBAR_CSS = `
-/* hide horizontal scrollbars cross-browser for designated containers */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 `;
@@ -79,8 +78,7 @@ export default function Dashboard() {
 
   return (
     <AuthenticatedLayout>
-      <Head title="Dashboard" />
-      {/* inject small CSS helper to hide scrollbars on specific containers */}
+      <Head title="Welcome" />
       <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS }} />
       <div className="min-h-screen bg-[#0a1726] text-white selection:bg-cyan-400/30">
         <Header
@@ -108,11 +106,22 @@ export default function Dashboard() {
 /* ------------------------------ Header ------------------------------ */
 
 function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
-  const [openBal, setOpenBal] = useState(false);
   const [openProfile, setOpenProfile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const headerRef = useRef(null);
+
+  // 1) Bevorzugt Backend-Flags (is_admin/is_runner)
+  // 2) Fallback: aus role/roles ableiten
+  const roleNames = [];
+  if (user?.role) roleNames.push(user.role);
+  if (Array.isArray(user?.roles)) {
+    for (const r of user.roles) roleNames.push(typeof r === 'string' ? r : r?.name);
+  }
+  const roleSet = new Set(roleNames.filter(Boolean).map(s => String(s).toLowerCase()));
+
+  const isAdmin = Boolean(user?.is_admin) || roleSet.has('admin') || roleSet.has('administrator');
+  const isRunner = Boolean(user?.is_runner) || roleSet.has('runner');
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 6);
@@ -121,24 +130,20 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // close menus on outside click
+  // außerhalb Klick schließt Profilmenü
   useEffect(() => {
     const onDoc = (e) => {
       if (!headerRef.current) return;
-      if (!headerRef.current.contains(e.target)) {
-        setOpenBal(false);
-        setOpenProfile(false);
-      }
+      if (!headerRef.current.contains(e.target)) setOpenProfile(false);
     };
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
   }, []);
 
-  // ESC closes everything
+  // ESC schließt Drawer & Menü
   useEffect(() => {
     const onEsc = (e) => {
       if (e.key === 'Escape') {
-        setOpenBal(false);
         setOpenProfile(false);
         setDrawerOpen(false);
       }
@@ -153,73 +158,70 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
 
   return (
     <div ref={headerRef} className="sticky top-0 z-50">
-      {/* Top bar (above categories) */}
+      {/* Top bar */}
       <div className={`relative z-20 transition-colors ${scrolled ? 'bg-[#0b1b2b]/80' : 'bg-transparent'} backdrop-blur supports-[backdrop-filter]:backdrop-blur-md shadow-sm`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="h-14 flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              <span className="text-lg font-semibold tracking-wide">Next2Win</span>
+              {/* Wortmarke -> /welcome */}
+              <Link href="/welcome" className="text-lg font-semibold tracking-wide">Next2Win</Link>
             </div>
 
             <div className="flex items-center gap-2">
+              {/* Mobile Kategorien */}
               <button
                 className="sm:hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition"
-                onClick={() => { setDrawerOpen(true); setOpenBal(false); setOpenProfile(false); }}
+                onClick={() => { setDrawerOpen(true); setOpenProfile(false); }}
                 aria-label="Open categories"
               >
                 <DotsIcon />
                 <span className="text-sm">Categories</span>
               </button>
 
-              <div className="hidden sm:flex items-center gap-1 mr-2">
-                <button
-                  onClick={() => { setOpenBal(v => !v); setOpenProfile(false); }} // make exclusive
-                  aria-haspopup="menu"
-                  aria-expanded={openBal}
-                  className="relative px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 hover:bg-emerald-500/25 transition text-emerald-100 text-sm"
+              {/* Guthaben – rein statisch, ohne Dropdown */}
+              <div className="hidden sm:flex items-center gap-1 mr-2 select-text">
+                <span
+                  className="px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-sm cursor-default"
+                  aria-label="Current balance"
                 >
                   {balanceText}
-                  {openBal && (
-                    <MenuCard onClose={() => setOpenBal(false)}>
-                      <MenuItem title="Deposit" />
-                      <MenuItem title="Withdraw" />
-                      <MenuItem title="Transactions" href="/transactions" />
-                    </MenuCard>
-                  )}
-                </button>
+                </span>
               </div>
 
-              {/* bell removed as requested */}
+              {/* Profil: Avatar-Button + Menü als Geschwister (kein Button-Nesting) */}
+              <div className="relative ml-1">
+                <button
+                  onClick={() => setOpenProfile(v => !v)}
+                  aria-haspopup="menu"
+                  aria-label="Profile menu"
+                  aria-expanded={openProfile}
+                  className="block"
+                >
+                  <Avatar imgUrl={user?.profile_photo_url} initials={initials} />
+                </button>
 
-              <button
-                onClick={() => { setOpenProfile(v => !v); setOpenBal(false); }} // make exclusive
-                aria-haspopup="menu"
-                aria-label="Profile menu"
-                aria-expanded={openProfile}
-                className="relative ml-1"
-              >
-                <Avatar imgUrl={user.profile_photo_url} initials={initials} />
                 {openProfile && (
-                  <MenuCard align="right" onClose={() => setOpenProfile(false)}>
+                  <MenuCard align="right">
                     <MenuItem title="Profile" href="/profile" />
-                    <MenuItem title="Settings" href="/settings" />
+                    {isAdmin && <MenuItem title="Admin-Panel" href="/admin/users" />}
+                    {isRunner && <MenuItem title="User-Panel" href="/runner/users" />}
                     <MenuItem title="Logout" href="/logout" method="post" />
                   </MenuCard>
                 )}
-              </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Categories row (under top bar) */}
+      {/* Kategorien-Zeile */}
       <div className="relative z-10 bg-[#0b1b2b]/85 backdrop-blur supports-[backdrop-filter]:backdrop-blur-md border-y border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="hidden sm:flex items-center gap-2 overflow-x-auto no-scrollbar py-2">
             {categories.map(cat => (
               <button
                 key={cat}
-                onClick={() => { setSelectedCat(cat); setOpenBal(false); setOpenProfile(false); }}
+                onClick={() => setSelectedCat(cat)}
                 className={[
                   'px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition',
                   selectedCat === cat
@@ -234,7 +236,7 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
         </div>
       </div>
 
-      {/* Mobile categories drawer */}
+      {/* Mobile Kategorien Drawer */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 sm:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
@@ -283,35 +285,28 @@ function Avatar({ imgUrl, initials }) {
   );
 }
 
-function MenuCard({ children, align = 'left', onClose }) {
+function MenuCard({ children, align = 'left' }) {
   return (
     <div
       role="menu"
       className={`absolute z-[80] mt-2 ${align === 'right' ? 'right-0' : 'left-0'} w-44 rounded-xl bg-[#0f2236] border border-white/10 shadow-lg overflow-hidden`}
-      onClick={onClose}
     >
       <div className="py-1">{children}</div>
     </div>
   );
 }
+
 function MenuItem({ title, href, method }) {
+  const base = "block w-full text-left px-3 py-2 text-sm hover:bg-white/10 transition";
   if (href) {
+    // <Link> als <a> (kein as="button"), somit kein Button-in-Button
     return (
-      <Link
-        href={href}
-        method={method}
-        as="button"
-        className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 transition"
-      >
+      <Link href={href} method={method} className={base}>
         {title}
       </Link>
     );
   }
-  return (
-    <button className="w-full text-left px-3 py-2 text-sm hover:bg-white/10 transition">
-      {title}
-    </button>
-  );
+  return <div className={base}>{title}</div>;
 }
 
 /* ------------------------------ Hero ------------------------------ */
@@ -448,16 +443,13 @@ function LazyGameCard({ game }) {
     >
       <div className="relative aspect-video rounded-xl overflow-hidden group/card bg-gradient-to-br from-cyan-400/20 via-indigo-400/15 to-emerald-400/20 border border-white/10">
         <img src={game.image} alt={game.title} loading="lazy" className="absolute inset-0 w-full h-full object-cover opacity-0" />
-        {/* provider chip */}
         <div className="absolute left-2 top-2 px-2 py-1 rounded-md bg-black/50 text-[10px] leading-none">
           {game.provider}
         </div>
-        {/* fav */}
         <button className="absolute right-2 top-2 p-1.5 rounded-md bg-black/40 hover:bg-black/60 transition" aria-label="Add to favorites">
           <HeartIcon />
         </button>
 
-        {/* overlays (deferred until idle + near) */}
         {(near && idle) && (
           <div className="absolute inset-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
             <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/60 to-transparent">

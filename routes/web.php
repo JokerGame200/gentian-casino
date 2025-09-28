@@ -36,26 +36,18 @@ Route::middleware('auth')->group(function () {
 
     // ---------- ADMIN ----------
     Route::middleware('role:Admin')->prefix('admin')->name('admin.')->group(function () {
-        // NEU: Haupt-Panel unter /admin
         Route::get('/', [AdminController::class, 'index'])->name('index');
-
-        // Kompatibilität: /admin/users zeigt auf dasselbe Panel
         Route::get('/users', [AdminController::class, 'index'])->name('users');
 
-        // Invite (bleibt bei deinem InvitationController)
         Route::post('/invite', [InvitationController::class, 'create'])->name('invite');
-
-        // Runner-Zuordnung (wie gehabt)
         Route::post('/users/{user}/assign-runner', [AdminController::class, 'assignRunner'])->name('assignRunner');
-
-        // BEREINIGT: nur noch diese Rollen-Route + Name, passt zur UsersPage.jsx
         Route::post('/users/{user}/role/set', [AdminController::class, 'setRole'])->name('setRole');
-
-        // Benutzer löschen
         Route::delete('/users/{user}', [AdminController::class, 'destroy'])->name('users.destroy');
-
-        // Separate Logs-Seite (optional weiterhin erreichbar)
         Route::get('/logs', [BalanceController::class, 'index'])->name('logs');
+
+        // FIX: kein zusätzliches /admin im Pfad; Name relativ -> ergibt admin.runners.updateLimits
+        Route::post('/runners/{runner}/limits', [AdminController::class, 'updateRunnerLimits'])
+            ->name('runners.updateLimits');
     });
 
     // ---------- RUNNER ----------
@@ -64,8 +56,8 @@ Route::middleware('auth')->group(function () {
         Route::get('/logs', [BalanceController::class, 'index'])->name('logs');
     });
 
-    // Balance (Admin|Runner)
-    Route::post('/users/{user}/balance', [BalanceController::class, 'store'])
+    // Balance (Admin|Runner) – FIX: auf update zeigen, dort ist die Limit-Prüfung
+    Route::post('/users/{user}/balance', [BalanceController::class, 'update'])
         ->middleware('role:Admin|Runner')->name('balance.update');
 
     // Welcome & Dashboard (verifiziert)

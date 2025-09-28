@@ -13,7 +13,7 @@ class BalanceLog extends Model
         'to_user_id',
         'amount',
         'kind',
-        'created_at',
+        #'created_at',
     ];
 
     protected $casts = [

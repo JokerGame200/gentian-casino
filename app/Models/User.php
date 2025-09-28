@@ -13,13 +13,22 @@ class User extends Authenticatable
     use Notifiable, HasRoles;
 
     // currency ergänzt
-    protected $fillable = ['username','password','balance','runner_id','email','name','currency','avatar'];
+    protected $fillable = [
+        'username', 'email', 'name', 'password',
+        'balance', 'currency',
+        'runner_id',
+        'runner_daily_limit',
+        'runner_per_user_limit',
+        'avatar',
+    ];
     protected $appends = ['avatar_url'];
     protected $hidden = ['password','remember_token'];
 
     // balance als Dezimal mit 2 Nachkommastellen
     protected $casts = [
         'balance' => 'decimal:2',
+        'runner_daily_limit' => 'decimal:2',
+        'runner_per_user_limit' => 'decimal:2',
     ];
     protected function avatarUrl(): Attribute
     {
