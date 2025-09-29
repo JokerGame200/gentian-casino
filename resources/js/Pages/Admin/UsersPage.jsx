@@ -55,7 +55,13 @@ export default function AdminPanel({ users, runners = [], stats = {}, logs }) {
 
   return (
     <AuthenticatedLayout>
-      <Head title="Admin Panel" />
+      <Head title="Admin Panel">
+        {/* Favicon nur für diese Seite */}
+        <link rel="icon" type="image/svg+xml" href="/img/play4cash-mark.svg" />
+        {/* Optional: Cache-Bust oder Fallbacks */}
+        {/* <link rel="icon" href="/img/play4cash-mark.svg?v=1" head-key="fav" /> */}
+        {/* <link rel="alternate icon" type="image/png" sizes="32x32" href="/img/play4cash-32.png" /> */}
+      </Head>
       <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS }} />
       <div className="min-h-screen bg-[#0a1726] text-white">
         <Header
@@ -146,8 +152,13 @@ function Header({ user, initials, balanceText, tab, setTab }) {
           <div className="h-14 flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
               {/* Wortmarke -> /welcome */}
-              <Link href={routeUrl('welcome', '/welcome')} className="text-lg font-semibold tracking-wide">
-                Next2Win
+              <Link href="/welcome" className="flex items-center gap-2 min-w-0" aria-label="Play4Cash home">
+                <img
+                  src="/img/play4cash-logo-horizontal.svg"
+                  alt="play4cash"
+                  className="h-6 w-auto select-none"
+                  draggable="false"
+                />
               </Link>
             </div>
 

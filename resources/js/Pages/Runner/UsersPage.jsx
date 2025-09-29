@@ -126,7 +126,14 @@ function Header({ user, initials, balanceText, tab, setTab }) {
           <div className="h-14 flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
               {/* Wortmarke -> /welcome */}
-              <Link href={routeUrl('welcome','/welcome')} className="text-lg font-semibold tracking-wide">Next2Win</Link>
+              <Link href="/welcome" className="flex items-center gap-2 min-w-0" aria-label="Play4Cash home">
+                <img
+                  src="/img/play4cash-logo-horizontal.svg"
+                  alt="play4cash"
+                  className="h-6 w-auto select-none"
+                  draggable="false"
+                />
+              </Link>
               <span className="text-xs ml-2 px-2 py-0.5 rounded bg-white/10 border border-white/10">Runner</span>
             </div>
 
