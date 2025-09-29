@@ -2,17 +2,15 @@
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\GamesApiController;
-use App\Http\Controllers\GamesProxyController;
 
-// Platzhalterroute (optional)
-Route::get('/ping', fn () => 'ok');
+Route::get('/ping', fn() => response()->json(['ok' => true]));
 
-Route::post('/gamesapi/callback', [GamesApiController::class, 'callback'])  // getBalance & writeBet
-  ->middleware(['throttle:120,1']); // schnell, aber begrenzt
+Route::middleware(['throttle:60,1'])->group(function () {
+    // öffentlich – Browser darf ohne Session-Cookies zugreifen
+    Route::post('/games/list', [GamesApiController::class, 'list'])->name('api.games.list');
 
-// interne Proxies (Frontend ruft DICH auf)
-Route::middleware('auth:sanctum')->group(function () {
-    Route::post('/games/list', [GamesProxyController::class, 'list']);
-    Route::post('/games/open', [GamesProxyController::class, 'open']);
-    Route::get('/games/jackpots', [GamesProxyController::class, 'jackpots']);
+    // optional nur für eingeloggte User (wenn du openGame nicht öffentlich willst)
+    Route::post('/games/open', [GamesApiController::class, 'open'])
+        // ->middleware('auth')    // <- auskommentiert lassen, wenn du erstmal testen willst
+        ->name('api.games.open');
 });
