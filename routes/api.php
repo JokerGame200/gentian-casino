@@ -1,16 +1,40 @@
 <?php
-
+// routes/api.php
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\GamesApiController;
 
-Route::get('/ping', fn() => response()->json(['ok' => true]));
+/**
+ * OPTIONAL: Spiel schließen (z. B. von deiner SPA aus),
+ * nur wenn du Sanctum wirklich benutzt. Sonst weglassen oder in web.php packen.
+ */
+Route::middleware('auth:sanctum')->post('/games/close', function (Request $r) {
+    if ($u = $r->user()) {
+        \App\Models\GameSession::where('user_id', $u->id)
+            ->where('status', 'open')
+            ->update(['status' => 'closed', 'closed_at' => now()]);
+    }
+    return response()->json(['ok' => true]);
+})->name('api.games.close');
 
-Route::middleware(['throttle:60,1'])->group(function () {
-    // öffentlich – Browser darf ohne Session-Cookies zugreifen
-    Route::post('/games/list', [GamesApiController::class, 'list'])->name('api.games.list');
+/**
+ * WICHTIG: Provider-Callback (getBalance / writeBet)
+ * Öffentlich, KEIN Login, KEIN CSRF (api-Gruppe hat standardmäßig kein CSRF).
+ * Hier NICHT 'auth:sanctum' o. ä. verwenden.
+ */
+Route::post('/games/callback', [GamesApiController::class, 'callback'])
+    ->name('games.callback');
 
-    // optional nur für eingeloggte User (wenn du openGame nicht öffentlich willst)
-    Route::post('/games/open', [GamesApiController::class, 'open'])
-        // ->middleware('auth')    // <- auskommentiert lassen, wenn du erstmal testen willst
-        ->name('api.games.open');
-});
+// (optional) Preflight fürs BO-Testtool
+Route::options('/games/callback', fn () => response('', 204));
+
+/**
+ * NICHT HIER definieren:
+ * - /games/list
+ * - /games/open
+ * Diese stehen in routes/web.php unter 'auth' (Web-Session + CSRF).
+ *
+ * Entferne außerdem alle alten/anderen Callback-Routen wie:
+ *   Route::post('/games/callback', [GamesWalletController::class,'handle'])
+ * …sonst gibt es Kollisionen.
+ */

@@ -1,81 +1,251 @@
 <?php
-// app/Http/Controllers/GamesApiController.php
+
 namespace App\Http\Controllers;
 
+use App\Models\User;
 use Illuminate\Http\Request;
-use Illuminate\Support\Str;
-use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 
 class GamesApiController extends Controller
 {
+    /**
+     * Echte Spiele-Liste vom Provider holen und flach normalisieren.
+     */
     public function list(Request $request)
     {
-    $hall = (string) config('gamesapi.hall_id', env('GAMESAPI_HALL_ID'));
-    $key  = (string) config('gamesapi.hall_key', env('GAMESAPI_HALL_KEY'));
-    $base = rtrim((string) config('gamesapi.base_url', env('GAMESAPI_BASE_URL', 'https://api.gamesapi.biz/API')), '/') . '/';
-    $img  = $request->input('img', 'game_img_2');
-    $cdn  = $request->input('cdnUrl', config('gamesapi.cdn_url'));
+        $imgStyle = $request->input('img', 'game_img_2');
 
-    if ($hall === '' || $key === '') {
-        return response()->json([
-            'status' => 'fail',
-            'error'  => 'server_not_configured',
-            'hint'   => 'Setze GAMESAPI_HALL_ID und GAMESAPI_HALL_KEY in .env',
-        ], 500);
-    }
-
-    $payload = ['hall'=>$hall, 'key'=>$key, 'cmd'=>'getGamesList', 'img'=>$img] + ($cdn ? ['cdnUrl'=>$cdn] : []);
-    $cacheKey = 'gamesapi:list:' . md5(json_encode($payload));
-    $ttl = now()->addMinutes((int) $request->integer('cache', 30));
-
-    if (!$request->boolean('refresh', false)) {
-        if ($cached = Cache::get($cacheKey)) {
-            return response()->json($cached);
+        $payload = [
+            'cmd'  => 'getGamesList',
+            'hall' => config('gamesapi.hall_id'),
+            'key'  => config('gamesapi.hall_key'),
+            'img'  => $imgStyle,
+        ];
+        // Nur setzen, wenn du ein /resources-Proxy-Setup hast:
+        if ($cdn = config('gamesapi.cdn_url')) {
+            $payload['cdnUrl'] = $cdn;
         }
-    }
 
-    // 1) Versuch: JSON POST (laut Doku: METHOD POST, REQUEST json)
-    $resp = Http::timeout(20)->acceptJson()->asJson()->post($base, $payload);
+        $resp = Http::timeout(20)->asJson()
+            ->post(config('gamesapi.base_url'), $payload);
 
-    $data = null;
-    try { $data = $resp->json(); } catch (\Throwable $e) { $data = null; }
-
-    // Wenn HTTP nicht OK → Fehlermeldung mit Rohtext zurückgeben
-    if (!$resp->ok()) {
-        return response()->json([
-            'status' => 'fail',
-            'error'  => 'upstream_http_'.$resp->status(),
-            'raw'    => Str::limit($resp->body(), 400),
-        ], 502);
-    }
-
-    // Wenn kein JSON, könnte der Server Form erwartet haben → 2) Fallback: asForm
-    if (!is_array($data)) {
-        $resp2 = Http::timeout(20)->acceptJson()->asForm()->post($base, $payload);
-        try { $data = $resp2->json(); } catch (\Throwable $e) { $data = null; }
-        if (!$resp2->ok() || !is_array($data)) {
+        if (!$resp->ok()) {
             return response()->json([
-                'status' => 'fail',
-                'error'  => 'upstream_not_json',
-                'raw'    => Str::limit($resp2->body() ?: $resp->body(), 500),
+                'status'   => 'fail',
+                'error'    => 'upstream_http_'.$resp->status(),
+                'upstream' => $resp->body(),
             ], 502);
         }
+
+        $data = $resp->json();
+        if (!is_array($data) || ($data['status'] ?? null) !== 'success') {
+            return response()->json([
+                'status'   => 'fail',
+                'error'    => $data['error'] ?? 'upstream_fail',
+                'upstream' => $data,
+            ], 422);
+        }
+
+        $content = $data['content'] ?? [];
+        $flat    = [];
+        foreach ($content as $providerTitle => $games) {
+            foreach ($games as $g) {
+                $flat[] = [
+                    'id'         => (string)($g['id'] ?? ''),
+                    'name'       => $g['name'] ?? '',
+                    'img'        => $g['img'] ?? null,
+                    'device'     => (int)($g['device'] ?? 2),
+                    'provider'   => $g['title'] ?? $providerTitle,
+                    'categories' => $g['categories'] ?? '',
+                    'demo'       => (int)($g['demo'] ?? 0),
+                    'rewriterule'=> (int)($g['rewriterule'] ?? 0),
+                    'exitButton' => (int)($g['exitButton'] ?? 0),
+                ];
+            }
+        }
+
+        usort($flat, fn($a,$b) => [$a['provider'],$a['name']] <=> [$b['provider'],$b['name']]);
+
+        return response()->json(['status'=>'success', 'games'=>$flat]);
     }
 
-    // Manche Implementierungen sparen "status" aus → Normalisieren
-    if (!isset($data['status'])) {
-        // Wenn "content" plausibel aussieht, als success interpretieren
-        $data = ['status' => 'success', 'error' => '', 'content' => $data['content'] ?? $data];
+    /**
+     * Spiel starten (Demo/Play) -> URL für iFrame zurückgeben.
+     * Login = User-ID, damit getBalance/writeBet den User sicher finden.
+     */
+    public function open(Request $request)
+    {
+        $request->validate([
+            'gameId' => ['required'],
+            'demo'   => ['nullable'],
+        ]);
+
+        $user  = $request->user();
+        $login = (string) $user->id; // stabil & eindeutig
+
+        $payload = [
+            'cmd'      => 'openGame',
+            'hall'     => config('gamesapi.hall_id'),
+            'key'      => config('gamesapi.hall_key'),
+            'login'    => $login,
+            'gameId'   => (string) $request->input('gameId'),
+            'domain'   => config('app.url'),
+            'exitUrl'  => route('games.exit'),
+            'language' => app()->getLocale() ?: 'en',
+            'demo'     => $request->boolean('demo') ? '1' : '0',
+        ];
+        if ($cdn = config('gamesapi.cdn_url')) {
+            $payload['cdnUrl'] = $cdn; // nur mit Proxy-Setup nutzen
+        }
+
+        $resp = Http::timeout(20)->asJson()
+            ->post(config('gamesapi.open_url'), $payload);
+
+        if (!$resp->ok()) {
+            return response()->json([
+                'status'=>'fail',
+                'error'=>'upstream_http_'.$resp->status(),
+                'upstream'=>$resp->body(),
+            ], 502);
+        }
+
+        $data = $resp->json();
+        if (!is_array($data) || ($data['status'] ?? null) !== 'success') {
+            return response()->json([
+                'status'=>'fail',
+                'error'=>$data['error'] ?? 'upstream_fail',
+                'upstream'=>$data,
+            ], 422);
+        }
+
+        $game = $data['content']['game'] ?? [];
+        $url  = $game['url'] ?? null;
+        if (!$url) {
+            return response()->json([
+                'status'=>'fail',
+                'error'=>'no_game_url',
+                'upstream'=>$data,
+            ], 422);
+        }
+
+        return response()->json([
+            'status'       => 'success',
+            'url'          => $url,
+            'withoutFrame' => $game['withoutFrame'] ?? '0',
+            'sessionId'    => $data['content']['gameRes']['sessionId'] ?? null,
+        ]);
     }
 
-    // Wenn status=fail aber error leer ist → sprechende Meldung
-    if (($data['status'] ?? null) !== 'success' && empty($data['error'])) {
-        $data['error'] = 'upstream_fail_no_error';
+    /**
+     * Callback vom Game-Server: getBalance / writeBet.
+     * Muss öffentlich erreichbar sein, ohne CSRF.
+     */
+    public function callback(Request $request)
+    {
+        $data = $request->json()->all();
+        if (!$data) $data = $request->all();
+
+        // Log eingehender Callback
+        Log::info('GAMES CALLBACK HIT', [
+            'ip'   => $request->ip(),
+            'cmd'  => $data['cmd'] ?? null,
+            'hall' => $data['hall'] ?? null,
+            'login'=> $data['login'] ?? null,
+        ]);
+
+        // Auth prüfen (Sign-Modus ist bei dir aus)
+        if (($data['hall'] ?? '') !== (string) config('gamesapi.hall_id')
+         || ($data['key']  ?? '') !== (string) config('gamesapi.hall_key')) {
+            Log::warning('GAMES CALLBACK AUTH FAILED', ['sent_hall' => $data['hall'] ?? null]);
+            return response()->json(['status'=>'fail','error'=>'auth_failed'], 403);
+        }
+
+        $cmd = $data['cmd'] ?? '';
+        if ($cmd === 'getBalance')  return $this->handleGetBalance($data);
+        if ($cmd === 'writeBet')    return $this->handleWriteBet($data);
+
+        return response()->json(['status'=>'fail','error'=>'unknown_cmd'], 400);
     }
 
-    Cache::put($cacheKey, $data, $ttl);
-    return response()->json($data);
-}
+    /**
+     * getBalance: echten Kontostand als String Decimal(12,2) liefern.
+     */
+    protected function handleGetBalance(array $data)
+    {
+        $login = trim((string)($data['login'] ?? ''));
+        if ($login === '') return response()->json(['status'=>'fail','error'=>'user_not_found']);
+
+        // erst nach ID (weil open() login = User-ID setzt), dann Fallback username/email
+        $user = null;
+        if (preg_match('/^\d+$/', $login)) {
+            $user = User::find((int) $login);
+        }
+        if (!$user) {
+            $user = User::where('username', $login)->orWhere('email', $login)->first();
+        }
+        if (!$user) return response()->json(['status'=>'fail','error'=>'user_not_found']);
+
+        $balance  = number_format((float)($user->balance ?? 0), 2, '.', '');
+        $currency = $user->currency ?? config('gamesapi.currency', 'EUR');
+
+        Log::info('GAMES getBalance OK', ['login' => $login, 'balance' => $balance]);
+
+        return response()->json([
+            'status'   => 'success',
+            'error'    => '',
+            'login'    => $login,
+            'balance'  => $balance,
+            'currency' => $currency,
+        ]);
+    }
+
+    /**
+     * writeBet: bet abziehen, win gutschreiben (atomar), neuen Saldo zurück.
+     */
+    protected function handleWriteBet(array $data)
+    {
+        $login = trim((string)($data['login'] ?? ''));
+        if ($login === '') return response()->json(['status'=>'fail','error'=>'user_not_found']);
+
+        $query = User::query();
+        if (preg_match('/^\d+$/', $login)) {
+            $query->where('id', (int) $login);
+        } else {
+            $query->where(function ($q) use ($login) {
+                $q->where('username', $login)->orWhere('email', $login);
+            });
+        }
+        $user = $query->lockForUpdate()->first();
+        if (!$user) return response()->json(['status'=>'fail','error'=>'user_not_found']);
+
+        $bet = (float)($data['bet'] ?? 0);
+        $win = (float)($data['win'] ?? 0);
+
+        return DB::transaction(function () use ($user, $bet, $win, $login) {
+            $current = (float)($user->balance ?? 0);
+
+            if ($current + 1e-9 < $bet) {
+                Log::warning('GAMES writeBet FAIL_BALANCE', ['login' => $login, 'have' => $current, 'need' => $bet]);
+                return response()->json(['status'=>'fail','error'=>'fail_balance']);
+            }
+
+            $user->balance = $current - $bet + $win;
+            $user->save();
+
+            $balance  = number_format((float)$user->balance, 2, '.', '');
+            $currency = $user->currency ?? config('gamesapi.currency', 'EUR');
+
+            Log::info('GAMES writeBet OK', ['login' => $login, 'bet' => $bet, 'win' => $win, 'new' => $balance]);
+
+            return response()->json([
+                'status'   => 'success',
+                'error'    => '',
+                'login'    => $login,
+                'balance'  => $balance,
+                'currency' => $currency,
+            ]);
+        });
+    }
 }
