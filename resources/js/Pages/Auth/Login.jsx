@@ -49,7 +49,7 @@ export default function Login() {
           {/* Header / wordmark */}
           <div className="text-center mb-6">
             <div className="inline-flex items-center gap-2">
-              <span className="text-xl font-semibold tracking-wide">Next2Win</span>
+              <span className="text-xl font-semibold tracking-wide">000000</span>
             </div>
             <p className="text-sm text-white/70 mt-1">Welcome back — sign in to continue</p>
           </div>
