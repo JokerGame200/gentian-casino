@@ -5,8 +5,7 @@ import React, {
 } from 'react';
 import { Head, usePage, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import * as ReactWindow from 'react-window';
-const { FixedSizeList: List } = ReactWindow;
+import { List } from 'react-window';
 
 /* ------------------------------ CSS ------------------------------ */
 const PERF_CSS = `
@@ -640,13 +639,15 @@ function SectionGridVirtualized({ title, items, onPlay, rightNode = null }) {
   const cellH = Math.round(cellW * 9 / 16);
   const rowH  = cellH;
   const rows = Math.ceil(items.length / cols);
-  const listHeight = Math.min(winH * 0.9, rows * rowH);
-  const Row = ({ index, style }) => {
+  const rowHeight = rowH + gap;
+  const listHeight = rows > 0 ? Math.min(winH * 0.9, rows * rowHeight) : rowHeight;
+  const rowProps = useMemo(() => ({}), []);
+  const Row = useCallback(({ index, style, ariaAttributes = {} }) => {
     const start = index * cols;
     const rowItems = items.slice(start, start + cols);
     return (
-      <div style={style}>
-        <div className="grid" style={{ display:'grid', gridTemplateColumns:`repeat(${cols}, minmax(0, 1fr))`, gap:`${gap}px`, paddingBottom:'12px' }}>
+      <div style={{ ...style, paddingBottom: `${gap}px` }} {...ariaAttributes}>
+        <div className="grid" style={{ display:'grid', gridTemplateColumns:`repeat(${cols}, minmax(0, 1fr))`, gap:`${gap}px` }}>
           {rowItems.map((g) => (
             <GameCard key={gameReactKey(g)} game={g} onPlay={openGameProxy(onPlay)} variant="grid" heightPx={cellH} />
           ))}
@@ -654,17 +655,24 @@ function SectionGridVirtualized({ title, items, onPlay, rightNode = null }) {
         </div>
       </div>
     );
-  };
+  }, [cols, items, gap, cellH, onPlay]);
   return (
     <section aria-label={title} ref={wrapRef} className="island">
       <div className="flex items-center justify-between mb-3 gap-3">
         <h2 className="text-lg sm:text-xl font-semibold truncate">{title}</h2>
         {rightNode}
       </div>
-      <div className="rounded-xl border border-white/10" style={{ height: listHeight, overflow: 'auto' }}>
-        <List height={listHeight} itemCount={rows} itemSize={rowH + 12} width={rect.width || 0} overscanCount={1} className="no-scrollbar">
-          {Row}
-        </List>
+      <div className="rounded-xl border border-white/10" style={{ height: listHeight, minHeight: rowHeight }}>
+        <List
+          className="no-scrollbar"
+          style={{ height: '100%', width: '100%' }}
+          rowComponent={Row}
+          rowCount={rows}
+          rowHeight={rowHeight}
+          rowProps={rowProps}
+          overscanCount={1}
+          defaultHeight={rowHeight}
+        />
       </div>
     </section>
   );

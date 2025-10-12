@@ -32,6 +32,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'signed'             => \App\Http\Middleware\ValidateSignature::class,
             'throttle'           => \Illuminate\Routing\Middleware\ThrottleRequests::class,
             'bindings'           => \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            'role'               => \Spatie\Permission\Middleware\RoleMiddleware::class,
         ]);
 
         /**
