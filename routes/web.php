@@ -35,10 +35,10 @@ Route::middleware('guest')->group(function () {
 Route::middleware(['web', 'auth'])->group(function () {
     Route::get('/api/games/list', [GamesApiController::class, 'list']);
     Route::post('/api/games/open', [GamesApiController::class, 'open']);
+    Route::post('/api/games/close', [GamesApiController::class, 'close'])->name('api.games.close');
 });
 
-Route::get('/games/exit', fn () => redirect()->route('welcome'))->name('games.exit');
-
+Route::get('/games/exit', [GamesApiController::class, 'exit'])->name('games.exit');
 
 Route::middleware('auth')->group(function () {
 

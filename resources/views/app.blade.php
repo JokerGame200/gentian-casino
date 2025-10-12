@@ -1,22 +1,3 @@
-<!DOCTYPE html>
-<html class="h-full bg-gray-100" lang="{{ str_replace('_','-',app()->getLocale()) }}">
-<head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="csrf-token" content="{{ csrf_token() }}">
-
-    @env('local')
-        @viteReactRefresh
-    @endenv
-
-    @vite(['resources/js/app.jsx'])
-    @routes
-</head>
-<body class="h-full">
-    @inertia
-</body>
-</html>
-<!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}">
     <head>
         <meta charset="utf-8">
@@ -25,7 +6,9 @@
 
         <title inertia>{{ config('app.name', 'Play4Cash') }}</title>
 
-        @viteReactRefresh
+        @env('local')
+            @viteReactRefresh
+        @endenv
         @vite(['resources/js/app.jsx'])
         @inertiaHead
 

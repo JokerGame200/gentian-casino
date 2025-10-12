@@ -306,6 +306,8 @@ class GamesApiController extends Controller
      */
     public function open(Request $request)
     {
+        $pendingSession = null;
+
         try {
             $request->validate([
                 'gameId' => ['required'],
@@ -317,14 +319,121 @@ class GamesApiController extends Controller
                 return response()->json(['status'=>'fail','error'=>'auth_required'], 401);
             }
 
-            $login = 'u' . (string) $user->id;
+            $gameId = (string) $request->input('gameId');
+            $login  = 'u' . (string) $user->id;
+
+            // Guard: nur eine aktive/opening Session pro Nutzer zulassen.
+            $guardResult = DB::transaction(function () use ($user, $gameId) {
+                User::whereKey($user->id)->lockForUpdate()->first();
+
+                $activeSessions = GameSession::where('user_id', $user->id)
+                    ->whereIn('status', ['open', 'opening'])
+                    ->lockForUpdate()
+                    ->get();
+
+                $now = Carbon::now();
+                $staleOpeningBefore = $now->copy()->subMinutes(3);
+                $staleOpenBefore = $now->copy()->subSeconds((int) config('gamesapi.stale_session_grace_seconds', 10));
+                $staleHardBefore = $now->copy()->subMinutes((int) config('gamesapi.stale_session_minutes', 30));
+                $active = null;
+
+                foreach ($activeSessions as $candidate) {
+                    if ($candidate->status === 'opening'
+                        && $candidate->created_at
+                        && $candidate->created_at->lt($staleOpeningBefore)) {
+                        $candidate->status = 'closed';
+                        $candidate->closed_at = $now;
+                        $candidate->save();
+                        continue;
+                    }
+
+                    if ($candidate->status === 'open' && $candidate->closed_at) {
+                        $candidate->status = 'closed';
+                        $candidate->save();
+                        continue;
+                    }
+
+                    if ($candidate->status === 'open'
+                        && $candidate->updated_at
+                        && $candidate->updated_at->lt($staleHardBefore)) {
+                        $candidate->status = 'closed';
+                        $candidate->closed_at = $now;
+                        $candidate->save();
+                        continue;
+                    }
+
+                    if ($candidate->status === 'open'
+                        && $candidate->updated_at
+                        && $candidate->updated_at->lt($staleOpenBefore)) {
+                        Log::info('GAMES guard auto-closing stale session', [
+                            'user_id'    => $user->id,
+                            'session_id' => $candidate->session_id,
+                            'status'     => $candidate->status,
+                            'updated_at' => $candidate->updated_at,
+                        ]);
+                        if (!$candidate->opened_at) {
+                            $candidate->opened_at = $now;
+                        }
+                        $candidate->status = 'closed';
+                        $candidate->closed_at = $now;
+                        $candidate->save();
+                        continue;
+                    }
+
+                    $active = $candidate;
+                    break;
+                }
+
+                if ($active) {
+                    Log::info('GAMES open blocked by active session', [
+                        'user_id'    => $user->id,
+                        'session_id' => $active->session_id,
+                        'status'     => $active->status,
+                        'updated_at' => $active->updated_at,
+                    ]);
+                    return ['blocked' => $active];
+                }
+
+                $session = GameSession::create([
+                    'user_id'    => $user->id,
+                    'game_id'    => $gameId,
+                    'session_id' => 'pending:' . Str::uuid(),
+                    'status'     => 'opening',
+                    'opened_at'  => null,
+                    'bet_total'  => 0,
+                    'win_total'  => 0,
+                ]);
+
+                return ['session' => $session];
+            });
+
+            if (isset($guardResult['blocked'])) {
+                /** @var GameSession $active */
+                $active = $guardResult['blocked'];
+                Log::notice('GAMES open denied: active session exists', [
+                    'user_id'    => $user->id,
+                    'session_id' => $active->session_id,
+                    'status'     => $active->status,
+                ]);
+                return response()->json([
+                    'status'    => 'fail',
+                    'error'     => 'active_game_in_progress',
+                    'sessionId' => $active->session_id,
+                ], 423);
+            }
+
+            /** @var GameSession|null $pendingSession */
+            $pendingSession = $guardResult['session'] ?? null;
+            if (!$pendingSession) {
+                throw new \RuntimeException('open_session_guard_failed');
+            }
 
             $payload = [
                 'cmd'      => 'openGame',
                 'hall'     => (string) config('gamesapi.hall_id'),
                 'key'      => (string) config('gamesapi.hall_key'),
                 'login'    => $login,
-                'gameId'   => (string) $request->input('gameId'),
+                'gameId'   => $gameId,
                 'domain'   => (string) config('app.url'),
                 'exitUrl'  => route('games.exit'),
                 'language' => app()->getLocale() ?: 'en',
@@ -345,6 +454,7 @@ class GamesApiController extends Controller
                     'status'   => $resp->status(),
                     'body_len' => strlen($resp->body() ?? ''),
                 ]);
+                $this->finalizePendingSession($pendingSession);
                 return response()->json([
                     'status'=>'fail',
                     'error'=>'upstream_http_'.$resp->status(),
@@ -357,6 +467,7 @@ class GamesApiController extends Controller
                 Log::warning('GAMES open upstream logical/format fail', [
                     'err' => $data['error'] ?? 'upstream_invalid_json_or_fail',
                 ]);
+                $this->finalizePendingSession($pendingSession);
                 return response()->json([
                     'status'=>'fail',
                     'error'=>$data['error'] ?? 'upstream_invalid_json_or_fail',
@@ -367,6 +478,7 @@ class GamesApiController extends Controller
             $game = $data['content']['game'] ?? [];
             $url  = $game['url'] ?? null;
             if (!$url) {
+                $this->finalizePendingSession($pendingSession);
                 return response()->json([
                     'status'=>'fail',
                     'error'=>'no_game_url',
@@ -374,13 +486,32 @@ class GamesApiController extends Controller
                 ], 422);
             }
 
+            $sessionId = $this->normalizeString($data['content']['gameRes']['sessionId'] ?? null);
+            if (!$sessionId) {
+                $this->finalizePendingSession($pendingSession);
+                return response()->json([
+                    'status'=>'fail',
+                    'error'=>'no_session_id',
+                    'upstream'=>$data,
+                ], 422);
+            }
+
+            $resolvedGameId = $this->normalizeString(
+                $data['content']['gameRes']['gameId']
+                ?? $game['id']
+                ?? $gameId
+            ) ?? $gameId;
+
+            $this->activatePendingSession($pendingSession, $sessionId, $resolvedGameId);
+
             return response()->json([
                 'status'       => 'success',
                 'url'          => $url,
                 'withoutFrame' => $game['withoutFrame'] ?? '0',
-                'sessionId'    => $data['content']['gameRes']['sessionId'] ?? null,
+                'sessionId'    => $sessionId,
             ]);
         } catch (\Throwable $e) {
+            $this->finalizePendingSession($pendingSession);
             Log::error('GAMES open SERVER EX', [
                 'msg'  => $e->getMessage(),
                 'file' => $e->getFile().':'.$e->getLine(),
@@ -390,6 +521,129 @@ class GamesApiController extends Controller
                 'error'  => 'server_exception',
             ], 500);
         }
+    }
+
+    private function finalizePendingSession(?GameSession $session): void
+    {
+        if (!$session || !$session->exists || $session->status !== 'opening') {
+            return;
+        }
+
+        if (!$session->opened_at) {
+            $session->opened_at = Carbon::now();
+        }
+        $session->status = 'closed';
+        $session->closed_at = Carbon::now();
+        $session->save();
+    }
+
+    private function activatePendingSession(GameSession $session, string $sessionId, string $gameId): void
+    {
+        $session->session_id = $sessionId;
+        $session->game_id = $gameId;
+        $session->status = 'open';
+        $session->opened_at = Carbon::now();
+        $session->closed_at = null;
+        $session->save();
+    }
+
+    public function close(Request $request)
+    {
+        $request->validate([
+            'sessionId' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        $user = $request->user();
+        if (!$user) {
+            return response()->json([
+                'status' => 'fail',
+                'error'  => 'invalid_context',
+            ], 422);
+        }
+
+        $sessionId = $this->normalizeString($request->input('sessionId'));
+        try {
+            $closed = $this->closeUserSessions($user, $sessionId);
+
+            return response()->json([
+                'status'     => 'success',
+                'sessionId'  => $sessionId,
+                'closed_cnt' => $closed,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('GAMES close API fail', [
+                'msg'        => $e->getMessage(),
+                'session_id' => $sessionId,
+                'user_id'    => $user->id,
+            ]);
+            return response()->json([
+                'status' => 'fail',
+                'error'  => 'server_error',
+            ], 500);
+        }
+    }
+
+    public function exit(Request $request)
+    {
+        $user = $request->user();
+        $sessionId = $this->normalizeString($request->query('sessionId') ?? $request->input('sessionId'));
+
+        Log::info('GAMES exit request', [
+            'session_id' => $sessionId,
+            'user_id'    => $user?->id,
+            'ip'         => $request->ip(),
+        ]);
+
+        try {
+            if ($user || $sessionId) {
+                $this->closeUserSessions($user, $sessionId);
+            }
+        } catch (\Throwable $e) {
+            Log::error('GAMES exit close fail', [
+                'msg'        => $e->getMessage(),
+                'session_id' => $sessionId,
+                'user_id'    => $user?->id,
+            ]);
+        }
+
+        return redirect()->route('welcome');
+    }
+
+    private function closeUserSessions(?User $user, ?string $sessionId): int
+    {
+        if (!$user && !$sessionId) {
+            return 0;
+        }
+
+        return DB::transaction(function () use ($user, $sessionId) {
+            $query = GameSession::query()
+                ->whereIn('status', ['open', 'opening'])
+                ->lockForUpdate();
+
+            if ($user) {
+                $query->where('user_id', $user->id);
+            }
+
+            if ($sessionId) {
+                $query->where('session_id', $sessionId);
+            }
+
+            $sessions = $query->get();
+            $now = Carbon::now();
+            $closed = 0;
+
+            foreach ($sessions as $session) {
+                if (!$session->opened_at) {
+                    $session->opened_at = $now;
+                }
+                $session->status = 'closed';
+                $session->closed_at = $now;
+                $session->save();
+                $closed++;
+            }
+
+            return $closed;
+        });
     }
 
     /**
