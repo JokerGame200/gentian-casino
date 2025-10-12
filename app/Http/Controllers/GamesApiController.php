@@ -2,12 +2,16 @@
 
 namespace App\Http\Controllers;
 
+use App\Models\GameRound;
+use App\Models\GameSession;
+use App\Models\GameTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Http\Client\Response;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 class GamesApiController extends Controller
@@ -478,22 +482,206 @@ class GamesApiController extends Controller
             $user = $query->lockForUpdate()->first();
             if (!$user) return response()->json(['status'=>'fail','error'=>'user_not_found']);
 
-            $bet = (float)($data['bet'] ?? 0);
-            $win = (float)($data['win'] ?? 0);
+            $bet = (float) ($data['bet'] ?? 0);
+            $win = (float) ($data['win'] ?? 0);
 
-            $current = (float)($user->balance ?? 0);
+            $tradeId = $this->normalizeString($data['tradeId'] ?? $data['trade_id'] ?? null);
+            $existingTransaction = null;
+            if ($tradeId) {
+                $existingTransaction = GameTransaction::where('trade_id', $tradeId)->lockForUpdate()->first();
+            }
+            if ($existingTransaction) {
+                $balanceValue = $existingTransaction->after_balance ?? $user->balance;
+                $balance = number_format((float) $balanceValue, 2, '.', '');
+                $currency = $user->currency ?? (string) config('gamesapi.currency', 'EUR');
+
+                Log::info('GAMES writeBet DUPLICATE', [
+                    'login'    => $login,
+                    'trade_id' => $tradeId,
+                    'bet'      => $bet,
+                    'win'      => $win,
+                    'balance'  => $balance,
+                    'tx_id'    => $existingTransaction->id ?? null,
+                ]);
+
+                return response()->json([
+                    'status'   => 'success',
+                    'error'    => '',
+                    'login'    => $login,
+                    'balance'  => $balance,
+                    'currency' => $currency,
+                ]);
+            }
+
+            $current = (float) ($user->balance ?? 0);
             if ($bet > 0 && $current + 1e-9 < $bet) {
                 Log::warning('GAMES writeBet FAIL_BALANCE', ['login'=>$login,'have'=>$current,'need'=>$bet]);
                 return response()->json(['status'=>'fail','error'=>'fail_balance']);
             }
 
-            $user->balance = $current - max(0,$bet) + max(0,$win);
+            $betPositive = max(0, $bet);
+            $winPositive = max(0, $win);
+
+            $user->balance = $current - $betPositive + $winPositive;
             $user->save();
 
-            $balance  = number_format((float)$user->balance, 2, '.', '');
+            $after = (float) $user->balance;
+
+            $sessionId = $this->normalizeString($data['sessionId'] ?? $data['session_id'] ?? null);
+            $providerGameId = $this->normalizeNumericId($data['providerGameId'] ?? $data['provider_game_id'] ?? null);
+            if ($providerGameId === null) {
+                $providerGameId = $this->normalizeNumericId($data['gameId'] ?? $data['game_id'] ?? null);
+            }
+
+            $gameId = $this->normalizeString($data['gameId'] ?? $data['game_id'] ?? null);
+            if (!$gameId) {
+                $gameId = $this->normalizeString($data['game'] ?? $data['gameCode'] ?? null);
+            }
+            $gameKey = $gameId ?? ($providerGameId !== null ? (string) $providerGameId : null);
+
+            $roundFinished = $this->normalizeBoolean($data['roundFinished'] ?? $data['round_finished'] ?? null);
+            $sessionFinished = $this->normalizeBoolean($data['sessionFinished'] ?? $data['session_finished'] ?? null);
+            $sessionStatus = $this->normalizeSessionStatus($data['sessionStatus'] ?? $data['session_status'] ?? null, $sessionFinished);
+
+            $roundTime = $this->parseDateTimeValue($data['roundTime'] ?? $data['round_time'] ?? $data['time'] ?? null);
+            $sessionOpenedAt = $this->parseDateTimeValue($data['sessionOpenedAt'] ?? $data['session_opened_at'] ?? null);
+            $sessionClosedAt = $this->parseDateTimeValue($data['sessionClosedAt'] ?? $data['session_closed_at'] ?? null);
+
+            $action = $this->normalizeString($data['action'] ?? $data['type'] ?? $data['gameAction'] ?? ($data['cmd'] ?? null));
+            $betInfo = $this->encodeToJsonString($data['betInfo'] ?? $data['bet_info'] ?? null);
+            $matrix = $this->encodeToJsonString($data['matrix'] ?? null);
+            $winLines = $this->encodeToJsonString($data['winLines'] ?? $data['win_lines'] ?? null);
+
+            $meta = is_array($data) ? $data : [];
+            foreach ([
+                'hall','key','cmd','login','bet','win','sessionId','session_id',
+                'tradeId','trade_id','providerGameId','provider_game_id','gameId','game_id',
+                'game','gameCode','game_code','roundFinished','round_finished',
+                'sessionFinished','session_finished','sessionStatus','session_status',
+                'sessionOpenedAt','session_opened_at','sessionClosedAt','session_closed_at',
+                'roundTime','round_time','time','action','type','gameAction',
+                'betInfo','bet_info','matrix','winLines','win_lines'
+            ] as $removeKey) {
+                if (array_key_exists($removeKey, $meta)) {
+                    unset($meta[$removeKey]);
+                }
+            }
+            $meta = array_filter($meta, static fn($value) => $value !== null);
+            if ($meta === []) {
+                $meta = null;
+            }
+
+            $session = null;
+            if ($sessionId && $gameKey) {
+                $session = GameSession::where('session_id', $sessionId)->lockForUpdate()->first();
+                $sessionIsNew = false;
+                if (!$session) {
+                    $sessionIsNew = true;
+                    $session = new GameSession([
+                        'user_id'    => $user->id,
+                        'game_id'    => $gameKey,
+                        'session_id' => $sessionId,
+                        'status'     => $sessionStatus ?? 'open',
+                        'opened_at'  => $sessionOpenedAt ?? $roundTime ?? Carbon::now(),
+                        'bet_total'  => 0,
+                        'win_total'  => 0,
+                    ]);
+                } else {
+                    if ($session->user_id !== $user->id) {
+                        $session->user_id = $user->id;
+                    }
+                    if (!$session->game_id && $gameKey) {
+                        $session->game_id = $gameKey;
+                    }
+                    if (!$session->opened_at && $sessionOpenedAt) {
+                        $session->opened_at = $sessionOpenedAt;
+                    }
+                }
+
+                if ($betPositive > 0) {
+                    $session->bet_total = round(((float) $session->bet_total) + $betPositive, 2);
+                }
+                if ($winPositive > 0) {
+                    $session->win_total = round(((float) $session->win_total) + $winPositive, 2);
+                }
+
+                if ($sessionStatus) {
+                    if ($sessionStatus === 'closed') {
+                        $session->status = 'closed';
+                    } elseif ($session->status !== 'closed') {
+                        $session->status = $sessionStatus;
+                    }
+                }
+
+                if ($sessionClosedAt) {
+                    $session->closed_at = $sessionClosedAt;
+                } elseif (($sessionStatus === 'closed' || $sessionFinished === true) && !$session->closed_at) {
+                    $session->closed_at = $roundTime ?? Carbon::now();
+                }
+
+                if ($sessionIsNew && ($sessionStatus === 'closed' || $sessionFinished === true) && !$session->closed_at) {
+                    $session->closed_at = $roundTime ?? Carbon::now();
+                }
+
+                $session->save();
+            }
+
+            $round = null;
+            if ($gameKey) {
+                $roundData = [
+                    'game_id'      => $gameKey,
+                    'player_login' => $login,
+                    'bet'          => $bet,
+                    'win'          => $win,
+                    'session_id'   => $sessionId,
+                    'trade_id'     => $tradeId,
+                    'action'       => $action,
+                    'bet_info'     => $betInfo,
+                    'matrix'       => $matrix,
+                    'win_lines'    => $winLines,
+                    'round_time'   => $roundTime,
+                ];
+
+                if ($tradeId) {
+                    $round = GameRound::updateOrCreate(
+                        ['trade_id' => $tradeId],
+                        $roundData
+                    );
+                } else {
+                    $round = GameRound::create($roundData);
+                }
+            }
+
+            $transactionPayload = [
+                'trade_id'         => $tradeId,
+                'user_id'          => $user->id,
+                'session_id'       => $sessionId,
+                'provider_game_id' => $providerGameId,
+                'bet'              => $bet,
+                'win'              => $win,
+                'before_balance'   => $current,
+                'after_balance'    => $after,
+                'action'           => $action,
+                'round_finished'   => $roundFinished,
+                'meta'             => $meta,
+            ];
+
+            $transaction = GameTransaction::create($transactionPayload);
+
+            $balance  = number_format($after, 2, '.', '');
             $currency = $user->currency ?? (string) config('gamesapi.currency', 'EUR');
 
-            Log::info('GAMES writeBet OK', ['login'=>$login,'bet'=>$bet,'win'=>$win,'new'=>$balance]);
+            Log::info('GAMES writeBet OK', [
+                'login'      => $login,
+                'bet'        => $bet,
+                'win'        => $win,
+                'new'        => $balance,
+                'trade_id'   => $tradeId,
+                'tx_id'      => $transaction->id ?? null,
+                'session_id' => $session?->id,
+                'round_id'   => $round?->id,
+                'game_id'    => $gameKey,
+            ]);
 
             return response()->json([
                 'status'   => 'success',
@@ -503,6 +691,129 @@ class GamesApiController extends Controller
                 'currency' => $currency,
             ]);
         });
+    }
+
+    private function normalizeBoolean(mixed $value): ?bool
+    {
+        if (is_bool($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            return ((float) $value) > 0;
+        }
+        if (is_string($value)) {
+            $normalized = strtolower(trim($value));
+            if ($normalized === '') {
+                return null;
+            }
+            if (in_array($normalized, ['1', 'true', 'yes', 'y', 'on'], true)) {
+                return true;
+            }
+            if (in_array($normalized, ['0', 'false', 'no', 'n', 'off'], true)) {
+                return false;
+            }
+        }
+        return null;
+    }
+
+    private function normalizeSessionStatus(mixed $status, ?bool $finished): ?string
+    {
+        if (is_string($status)) {
+            $normalized = strtolower(trim($status));
+            if ($normalized !== '') {
+                if (in_array($normalized, ['closed', 'close', 'closing', 'finished', 'finish', 'completed', 'complete', 'ended', 'end'], true)) {
+                    return 'closed';
+                }
+                if (in_array($normalized, ['open', 'opening', 'active', 'start', 'started'], true)) {
+                    return 'open';
+                }
+                return $normalized;
+            }
+        }
+        if ($finished === true) {
+            return 'closed';
+        }
+        return null;
+    }
+
+    private function parseDateTimeValue(mixed $value): ?Carbon
+    {
+        if ($value instanceof Carbon) {
+            return $value;
+        }
+        if ($value instanceof \DateTimeInterface) {
+            return Carbon::instance($value);
+        }
+        if (is_numeric($value)) {
+            $numeric = (float) $value;
+            if ($numeric <= 0) {
+                return null;
+            }
+            if ($numeric > 9999999999) {
+                return Carbon::createFromTimestamp((int) round($numeric / 1000));
+            }
+            return Carbon::createFromTimestamp((int) round($numeric));
+        }
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            if ($trimmed === '') {
+                return null;
+            }
+            try {
+                return Carbon::parse($trimmed);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    private function encodeToJsonString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            return $trimmed === '' ? null : $value;
+        }
+        if (is_scalar($value)) {
+            return (string) $value;
+        }
+        try {
+            $encoded = json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            return $encoded === false ? null : $encoded;
+        } catch (\Throwable) {
+            return null;
+        }
+    }
+
+    private function normalizeString(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (is_string($value)) {
+            $trimmed = trim($value);
+            return $trimmed === '' ? null : $trimmed;
+        }
+        if (is_scalar($value)) {
+            $string = trim((string) $value);
+            return $string === '' ? null : $string;
+        }
+        return null;
+    }
+
+    private function normalizeNumericId(mixed $value): ?int
+    {
+        if (is_int($value)) {
+            return $value;
+        }
+        if (is_numeric($value)) {
+            $int = (int) $value;
+            return $int >= 0 ? $int : null;
+        }
+        return null;
     }
 
     /**

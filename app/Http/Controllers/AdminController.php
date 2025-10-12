@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\User;
 use App\Models\BalanceLog;
+use App\Models\GameRound;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -84,7 +85,7 @@ class AdminController extends Controller
                                     ->sum('amount')),
         ];
 
-        // --- Logs kompakt (für Tab "Logs" im Admin-Panel) ---
+        // --- Dealer Logs (Balance-Transfers) ---
         $logs = BalanceLog::query()
             ->with([
                 'fromUser:id,username',
@@ -109,11 +110,45 @@ class AdminController extends Controller
             })
             ->withQueryString();
 
+        // --- Game Logs (Aggregierte Spielstatistiken) ---
+        $gameLogs = GameRound::query()
+            ->leftJoin('games', 'games.game_id', '=', 'game_rounds.game_id')
+            ->select([
+                'game_rounds.game_id',
+                DB::raw('COALESCE(MAX(games.name), game_rounds.game_id) as game_name'),
+                DB::raw('MAX(games.provider) as provider'),
+                DB::raw('COUNT(*) as rounds_count'),
+                DB::raw('SUM(game_rounds.bet) as total_bet'),
+                DB::raw('SUM(game_rounds.win) as total_win'),
+                DB::raw('SUM(game_rounds.win - game_rounds.bet) as player_result'),
+                DB::raw('SUM(game_rounds.bet - game_rounds.win) as house_result'),
+            ])
+            ->groupBy('game_rounds.game_id')
+            ->orderByDesc('total_bet')
+            ->paginate(25)
+            ->through(function ($row) {
+                $totalBet = (float) ($row->total_bet ?? 0);
+                $totalWin = (float) ($row->total_win ?? 0);
+
+                return [
+                    'game_id'       => $row->game_id,
+                    'game_name'     => $row->game_name ?? $row->game_id,
+                    'provider'      => $row->provider,
+                    'rounds_count'  => (int) ($row->rounds_count ?? 0),
+                    'total_bet'     => round($totalBet, 2),
+                    'total_win'     => round($totalWin, 2),
+                    'player_result' => round((float) ($row->player_result ?? ($totalWin - $totalBet)), 2),
+                    'house_result'  => round((float) ($row->house_result ?? ($totalBet - $totalWin)), 2),
+                ];
+            })
+            ->withQueryString();
+
         return Inertia::render('Admin/UsersPage', [
             'users'   => $users,
             'runners' => $runners,
             'stats'   => $stats,
             'logs'    => $logs,
+            'gameLogs'=> $gameLogs,
         ]);
     }
 

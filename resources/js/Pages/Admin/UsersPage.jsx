@@ -19,13 +19,16 @@ const HIDE_SCROLLBAR_CSS = `
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 `;
 
-export default function AdminPanel({ users, runners = [], stats = {}, logs }) {
+export default function AdminPanel({ users, runners = [], stats = {}, logs, gameLogs }) {
   const { props } = usePage();
   const user = props?.auth?.user || {};
   const inviteUrl = props?.flash?.invite_url || '';
 
   // Tab-State persistent merken
   const [tab, setTab] = useRemember('Users', 'adminUsersTab');
+  useEffect(() => {
+    if (tab === 'Logs') setTab('DealerLogs');
+  }, [tab, setTab]);
 
   // Wenn ein neuer Invite erstellt wurde, automatisch den "Invites"-Tab anzeigen
   React.useEffect(() => {
@@ -85,7 +88,8 @@ export default function AdminPanel({ users, runners = [], stats = {}, logs }) {
           <div className="mt-8">
             {tab === 'Users' && <UsersAdmin users={users} runners={runners} />}
             {tab === 'Invites' && <InvitesAdmin runners={runners} />}
-            {tab === 'Logs' && <LogsAdmin logs={logs} />}
+            {tab === 'DealerLogs' && <LogsAdmin logs={logs} />}
+            {tab === 'GameLogs' && <GameLogsAdmin gameLogs={gameLogs} />}
             {tab === 'RunnerSettings' && <RunnerSettingsAdmin runners={runners} />}
           </div>
         </main>
@@ -140,7 +144,8 @@ function Header({ user, initials, balanceText, tab, setTab }) {
   const tabs = [
     { key: 'Users', label: 'Users' },
     { key: 'Invites', label: 'Invites' },
-    { key: 'Logs', label: 'Logs' },
+    { key: 'DealerLogs', label: 'Dealer Logs' },
+    { key: 'GameLogs', label: 'Game Logs' },
     { key: 'RunnerSettings', label: 'Runner Settings' },
   ];
 
@@ -470,7 +475,7 @@ function UserRow({ user, runners }) {
   );
 }
 
-/* ============================ Logs (gleiche Daten wie /admin/logs) ============================ */
+/* ============================ Dealer Logs (Balance-Transfers) ============================ */
 
 function LogsAdmin({ logs }) {
   const [q, setQ] = useState('');
@@ -498,7 +503,7 @@ function LogsAdmin({ logs }) {
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between gap-4">
-        <h2 className="text-lg font-semibold">Logs</h2>
+        <h2 className="text-lg font-semibold">Dealer Logs</h2>
         <div className="flex items-center gap-2">
           <input
             type="search"
@@ -564,6 +569,127 @@ function LogsAdmin({ logs }) {
             <button
               key={i}
               className={`px-3 py-1.5 rounded-lg border border-white/10 text-sm ${l.active ? "bg-white/10" : "bg-white/[0.03] hover:bg-white/[0.06]"} ${!l.url ? "opacity-50 cursor-not-allowed" : ""}`}
+              dangerouslySetInnerHTML={{ __html: l.label }}
+              disabled={!l.url}
+              onClick={() => l.url && router.visit(l.url, { preserveState: true, preserveScroll: true })}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+/* ============================ Game Logs (Aggregierte Spielstatistiken) ============================ */
+
+function GameLogsAdmin({ gameLogs }) {
+  const [q, setQ] = useState('');
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      router.reload({ only: ['gameLogs'], preserveState: true, preserveScroll: true });
+    }, 10000);
+    return () => clearInterval(id);
+  }, []);
+
+  const items = Array.isArray(gameLogs?.data) ? gameLogs.data : (Array.isArray(gameLogs) ? gameLogs : []);
+
+  const filtered = useMemo(() => {
+    const term = q.trim().toLowerCase();
+    if (!term) return items;
+    return items.filter((row) => {
+      const gameName = String(row?.game_name ?? '').toLowerCase();
+      const provider = String(row?.provider ?? '').toLowerCase();
+      const gameId = String(row?.game_id ?? '').toLowerCase();
+      return gameName.includes(term) || provider.includes(term) || gameId.includes(term);
+    });
+  }, [items, q]);
+
+  return (
+    <section className="space-y-6">
+      <div className="flex items-center justify-between gap-4">
+        <h2 className="text-lg font-semibold">Game Logs</h2>
+        <div className="flex items-center gap-2">
+          <input
+            type="search"
+            placeholder="Filter: Spiel oder Provider…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
+          />
+          <button
+            onClick={() => router.reload({ only: ['gameLogs'], preserveState: true, preserveScroll: true })}
+            className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10"
+          >
+            Aktualisieren
+          </button>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
+        <table className="min-w-full text-sm">
+          <thead className="bg-white/5 text-white/80">
+            <tr>
+              <Th>Spiel</Th>
+              <Th>Provider</Th>
+              <Th className="text-right w-24">Runden</Th>
+              <Th className="text-right w-32">Einsatz</Th>
+              <Th className="text-right w-32">Gewinn</Th>
+              <Th className="text-right w-32">Player Result</Th>
+              <Th className="text-right w-32">Dealer Profit</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((row, idx) => {
+              const key = row?.game_id ?? row?.game_name ?? `game-${idx}`;
+              const totalBet = Number(row?.total_bet ?? 0);
+              const totalWin = Number(row?.total_win ?? 0);
+              const playerResult = Number(row?.player_result ?? (totalWin - totalBet));
+              const houseResult = Number(row?.house_result ?? (totalBet - totalWin));
+              const rounds = Number(row?.rounds_count ?? 0);
+
+              return (
+                <tr key={key} className="border-t border-white/10">
+                  <Td>
+                    <div className="flex flex-col">
+                      <span className="font-medium">{row?.game_name ?? row?.game_id ?? '—'}</span>
+                      <span className="text-xs text-white/60">#{row?.game_id ?? 'n/a'}</span>
+                    </div>
+                  </Td>
+                  <Td>{row?.provider ?? '—'}</Td>
+                  <Td className="text-right font-mono">{rounds.toLocaleString()}</Td>
+                  <Td className="text-right font-mono">{totalBet.toFixed(2)}</Td>
+                  <Td className="text-right font-mono">{totalWin.toFixed(2)}</Td>
+                  <Td className="text-right font-mono">
+                    <span className={playerResult >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                      {playerResult >= 0 ? '+' : ''}
+                      {playerResult.toFixed(2)}
+                    </span>
+                  </Td>
+                  <Td className="text-right font-mono">
+                    <span className={houseResult >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                      {houseResult >= 0 ? '+' : ''}
+                      {houseResult.toFixed(2)}
+                    </span>
+                  </Td>
+                </tr>
+              );
+            })}
+            {filtered.length === 0 && (
+              <tr>
+                <td colSpan={7} className="p-4 text-center text-white/60">Keine Einträge gefunden.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {Array.isArray(gameLogs?.links) && gameLogs.links.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {gameLogs.links.map((l, i) => (
+            <button
+              key={i}
+              className={`px-3 py-1.5 rounded-lg border border-white/10 text-sm ${l.active ? 'bg-white/10' : 'bg-white/[0.03] hover:bg-white/[0.06]'} ${!l.url ? 'opacity-50 cursor-not-allowed' : ''}`}
               dangerouslySetInnerHTML={{ __html: l.label }}
               disabled={!l.url}
               onClick={() => l.url && router.visit(l.url, { preserveState: true, preserveScroll: true })}

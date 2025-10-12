@@ -28,7 +28,7 @@ export default function LogsPage({ logs }) {
     <div className="space-y-6">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-xl font-semibold">
-          Balance Logs {isAdmin ? "(Admin)" : isRunner ? "(Runner)" : ""}
+          Dealer Logs {isAdmin ? "(Admin)" : isRunner ? "(Runner)" : ""}
         </h1>
         <div className="flex items-center gap-2">
           <input

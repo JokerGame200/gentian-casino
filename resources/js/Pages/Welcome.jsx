@@ -21,10 +21,46 @@ const PERF_CSS = `
 `;
 
 const PROVIDER_TABS = [
-  'All','novomatic','ainsworth','pragmatic','NetEnt','microgaming','scientific_games','aristocrat',
-  'quickspin','igt','scratch','igrosoft','amatic','apex','merkur','table_games','gclub',
-  'habanero','apollo','wazdan','egt','roulette','bingo','keno'
+  'Home','rubyplay','hacksaw','3oaks','aristocrat','egaming','pragmatic','microgaming','novomatic',
+  'jili','scientific_games','booming','firekirin','pgsoft','zitro','playngo','amatic','apollo',
+  'fish','kajot','vegas','ainsworth','quickspin','NetEnt','habanero','igt','igrosoft','apex',
+  'merkur','wazdan','egt','roulette','bingo','keno','table_games'
 ];
+
+const NUMBER_WORD_MAP = {
+  zero: '0', one: '1', two: '2', three: '3', four: '4',
+  five: '5', six: '6', seven: '7', eight: '8', nine: '9',
+};
+const extractSlugParts = (slug) => {
+  const s = slug || '';
+  return {
+    letters: s.replace(/[^a-z]/g, ''),
+    digits: s.replace(/[^0-9]/g, ''),
+  };
+};
+const normalizeSlug = (value) => {
+  const normalized = stableProvider(value);
+  if (!normalized) return '';
+  const numericWordsReplaced = normalized.replace(
+    /\b(zero|one|two|three|four|five|six|seven|eight|nine)\b/g,
+    (match) => NUMBER_WORD_MAP[match] ?? match
+  );
+  return numericWordsReplaced
+    .replace(/\s+/g, '')
+    .replace(/zero|one|two|three|four|five|six|seven|eight|nine/g, (match) => NUMBER_WORD_MAP[match] ?? match);
+};
+const matchesProviderSlug = (providerSlug, tabSlug) => {
+  if (!providerSlug || !tabSlug) return false;
+  if (providerSlug === tabSlug) return true;
+  if (providerSlug.startsWith(tabSlug)) return true;
+  if (tabSlug.startsWith(providerSlug)) return true;
+  if (providerSlug.includes(tabSlug)) return true;
+  if (tabSlug.includes(providerSlug)) return true;
+  const provParts = extractSlugParts(providerSlug);
+  const tabParts = extractSlugParts(tabSlug);
+  if (provParts.letters === tabParts.letters && provParts.digits === tabParts.digits) return true;
+  return false;
+};
 
 const CATEGORY_PAGE_SIZE = 25;
 
@@ -329,8 +365,17 @@ export default function Welcome() {
   }, []);
 
   // ------------ Kategorien & Suche (Tabs aus Doku) ------------
-  const [selectedCat, setSelectedCat] = useState('All');
+  const [selectedCat, setSelectedCat] = useState(PROVIDER_TABS[0]);
   const providerTabs = PROVIDER_TABS;
+  const normalizedSelectedCat = useMemo(() => {
+    if (!selectedCat || selectedCat === 'Home') return '';
+    return normalizeSlug(selectedCat);
+  }, [selectedCat]);
+  const prettySelectedCat = useMemo(
+    () => (selectedCat ? selectedCat.replace(/_/g, ' ') : ''),
+    [selectedCat]
+  );
+  const isHomeTab = selectedCat === 'Home';
   const [queries, setQueries] = useState({});
   const q = queries[selectedCat] ?? '';
   const dq = useDeferredValue(q);
@@ -339,15 +384,25 @@ export default function Welcome() {
   const filteredGames = useMemo(() => {
     const s = String(dq ?? '').trim().toLowerCase();
     let out = games;
-    if (selectedCat !== 'All') {
-      const cat = selectedCat.toLowerCase();
-      out = out.filter(g => g?._providerL?.includes(cat));
+    if (normalizedSelectedCat) {
+      out = out.filter((g) => {
+        const providerSlug = normalizeSlug(g?._provN || g?.provider || '');
+        if (matchesProviderSlug(providerSlug, normalizedSelectedCat)) return true;
+        const categoriesSlug = normalizeSlug(g?.categories || '');
+        if (categoriesSlug && categoriesSlug.includes(normalizedSelectedCat)) return true;
+        const aliases = Array.isArray(g?.aliases) ? g.aliases : [];
+        for (const alias of aliases) {
+          const aliasSlug = normalizeSlug(alias);
+          if (matchesProviderSlug(aliasSlug, normalizedSelectedCat)) return true;
+        }
+        return false;
+      });
     }
     if (s) {
       out = out.filter(g => g?._searchText?.includes(s));
     }
     return out;
-  }, [games, selectedCat, dq]);
+  }, [games, normalizedSelectedCat, dq]);
 
   const providers = useMemo(() => {
     const by = new Map();
@@ -447,7 +502,7 @@ export default function Welcome() {
     try { history.back(); } catch {}
   }, []);
 
-  const searchPlaceholder = selectedCat === 'All' ? 'Search games or providers…' : `Search in ${selectedCat}…`;
+  const searchPlaceholder = isHomeTab ? 'Search games or providers…' : `Search in ${prettySelectedCat || 'games'}…`;
 
   /* ------------------------------ Render ------------------------------ */
   return (
@@ -476,7 +531,7 @@ export default function Welcome() {
               <div className="text-white/70">Lade Spiele…</div>
             ) : gamesError ? (
               <div className="text-red-300">{gamesError}</div>
-            ) : selectedCat === 'All' ? (
+            ) : isHomeTab ? (
               <>
                 <SectionCarousel
                   title="All Games"
@@ -490,7 +545,7 @@ export default function Welcome() {
               </>
             ) : (
               <SectionGridVirtualized
-                title={`${selectedCat} Games`}
+                title={`${prettySelectedCat || selectedCat} Games`}
                 items={filteredGames}
                 onPlay={openGame}
                 rightNode={<SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} />}
