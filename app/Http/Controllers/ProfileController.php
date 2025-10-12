@@ -71,7 +71,7 @@ class ProfileController extends Controller
 
         return Redirect::route('profile.edit')
             ->with('status', 'profile-updated')
-            ->with('success', 'Profil aktualisiert.');
+            ->with('success', 'Profile updated.');
     }
 
     /**

@@ -1,5 +1,6 @@
 // resources/js/Pages/Admin/UsersPage.jsx
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import QRCode from 'qrcode';
 import { Head, Link, useForm, usePage, router, useRemember } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
 
@@ -18,19 +19,44 @@ const HIDE_SCROLLBAR_CSS = `
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 `;
+const PANEL_TEXT_CSS = `
+.admin-panel { color: rgba(255, 255, 255, 0.9); }
+.admin-panel table td { color: rgba(255, 255, 255, 0.82); }
+.admin-panel table th { color: #ffffff; }
+.admin-panel .text-white\\/90,
+.admin-panel .text-white\\/80,
+.admin-panel .text-white\\/70,
+.admin-panel .text-white\\/60,
+.admin-panel .text-white\\/50,
+.admin-panel .text-white\\/40,
+.admin-panel .text-white\\/30 {
+  color: #ffffff !important;
+}
+.admin-panel .text-black,
+.admin-panel .text-slate-900,
+.admin-panel .text-slate-800,
+.admin-panel .text-slate-700,
+.admin-panel .text-gray-900,
+.admin-panel .text-gray-800,
+.admin-panel .text-gray-700,
+.admin-panel .text-neutral-900,
+.admin-panel .text-neutral-800 {
+  color: #ffffff !important;
+}
+`;
 
 export default function AdminPanel({ users, runners = [], stats = {}, logs, gameLogs }) {
   const { props } = usePage();
   const user = props?.auth?.user || {};
   const inviteUrl = props?.flash?.invite_url || '';
 
-  // Tab-State persistent merken
+  // Persist tab state across visits
   const [tab, setTab] = useRemember('Users', 'adminUsersTab');
   useEffect(() => {
     if (tab === 'Logs') setTab('DealerLogs');
   }, [tab, setTab]);
 
-  // Wenn ein neuer Invite erstellt wurde, automatisch den "Invites"-Tab anzeigen
+  // When a new invite was created, automatically show the "Invites" tab
   React.useEffect(() => {
     if (inviteUrl) setTab('Invites');
   }, [inviteUrl, setTab]);
@@ -59,14 +85,14 @@ export default function AdminPanel({ users, runners = [], stats = {}, logs, game
   return (
     <AuthenticatedLayout>
       <Head title="Admin Panel">
-        {/* Favicon nur für diese Seite */}
+        {/* Favicon just for this page */}
         <link rel="icon" type="image/svg+xml" href="/img/play4cash-mark.svg" />
-        {/* Optional: Cache-Bust oder Fallbacks */}
+        {/* Optional: cache busters or fallbacks */}
         {/* <link rel="icon" href="/img/play4cash-mark.svg?v=1" head-key="fav" /> */}
         {/* <link rel="alternate icon" type="image/png" sizes="32x32" href="/img/play4cash-32.png" /> */}
       </Head>
-      <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS }} />
-      <div className="min-h-screen bg-[#0a1726] text-white">
+      <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS + PANEL_TEXT_CSS }} />
+      <div className="min-h-screen bg-[#0a1726] text-white admin-panel">
         <Header
           user={user}
           initials={initials}
@@ -79,7 +105,7 @@ export default function AdminPanel({ users, runners = [], stats = {}, logs, game
           {/* KPIs */}
           <section className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mt-6">
             <KpiCard label="Users" value={kpis.users} />
-            <KpiCard label="Runners" value={kpis.runners} />
+            <KpiCard label="Dealers" value={kpis.runners} />
             <KpiCard label="Deposits (today)" value={formatCurrency(kpis.depositsToday, currency)} />
             <KpiCard label="GGR (today)" value={formatCurrency(kpis.ggrToday, currency)} />
           </section>
@@ -98,7 +124,7 @@ export default function AdminPanel({ users, runners = [], stats = {}, logs, game
   );
 }
 
-/* ============================ Header (wie Welcome.jsx) ============================ */
+/* ============================ Header (mirrors Welcome.jsx) ============================ */
 
 function Header({ user, initials, balanceText, tab, setTab }) {
   const [openProfile, setOpenProfile] = useState(false);
@@ -106,7 +132,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
   const [scrolled, setScrolled] = useState(false);
   const headerRef = useRef(null);
 
-  // Rollen wie in Welcome.jsx bestimmen
+  // Determine roles similar to Welcome.jsx
   const roleNames = [];
   if (user?.role) roleNames.push(user.role);
   if (Array.isArray(user?.roles)) {
@@ -123,7 +149,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // außerhalb Klick schließt Profilmenü
+  // Clicking outside closes the profile menu
   useEffect(() => {
     const onDoc = (e) => {
       if (!headerRef.current) return;
@@ -133,42 +159,45 @@ function Header({ user, initials, balanceText, tab, setTab }) {
     return () => document.removeEventListener('click', onDoc);
   }, []);
 
-  // ESC schließt Drawer & Menü
+  // ESC closes drawer & menu
   useEffect(() => {
     const onEsc = (e) => { if (e.key === 'Escape') { setOpenProfile(false); setDrawerOpen(false); } };
     window.addEventListener('keydown', onEsc);
     return () => window.removeEventListener('keydown', onEsc);
   }, []);
 
-  // Tabs für Admin-Bereich (bleiben erhalten)
+  // Tabs for the admin area (keys stay the same)
   const tabs = [
     { key: 'Users', label: 'Users' },
     { key: 'Invites', label: 'Invites' },
     { key: 'DealerLogs', label: 'Dealer Logs' },
     { key: 'GameLogs', label: 'Game Logs' },
-    { key: 'RunnerSettings', label: 'Runner Settings' },
+    { key: 'RunnerSettings', label: 'Dealer Settings' },
   ];
 
   return (
     <div ref={headerRef} className="sticky top-0 z-50">
-      {/* Top bar – identisch zu Welcome.jsx, aber ohne Kategorien */}
+      {/* Top bar – same as Welcome.jsx, but without categories */}
       <div className={`relative z-20 transition-colors ${scrolled ? 'bg-[#0b1b2b]/80' : 'bg-transparent'} backdrop-blur supports-[backdrop-filter]:backdrop-blur-md shadow-sm`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="h-14 flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              {/* Wortmarke -> /welcome */}
+              {/* Wordmark -> /welcome */}
               <Link href="/welcome" className="flex items-center gap-2 min-w-0" aria-label="Play4Cash home">
                 <img
                   src="/img/play4cash-logo-horizontal.svg"
                   alt="play4cash"
-                  className="h-6 w-auto select-none"
+                  className="h-8 sm:h-10 lg:h-12 w-auto select-none drop-shadow-[0_8px_24px_rgba(34,211,238,0.35)]"
                   draggable="false"
+                  loading="eager"
+                  decoding="async"
+                  style={{ imageRendering: '-webkit-optimize-contrast' }}
                 />
               </Link>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Mobile Drawer für Sektionen/Tabs */}
+              {/* Mobile drawer for sections/tabs */}
               <button
                 className="sm:hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition"
                 onClick={() => { setDrawerOpen(true); setOpenProfile(false); }}
@@ -178,7 +207,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                 <span className="text-sm">Sections</span>
               </button>
 
-              {/* Guthaben – statische Pille (kein Dropdown → kein Button-Nesting) */}
+              {/* Balance pill (static, no dropdown so no button nesting) */}
               <div className="hidden sm:flex items-center gap-1 mr-2 select-text">
                 <span
                   className="px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-sm cursor-default"
@@ -188,7 +217,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                 </span>
               </div>
 
-              {/* Profil: Avatar-Button + Menü als Geschwister (keine Button-Verschachtelung) */}
+              {/* Profile avatar button + menu as siblings (no nested buttons) */}
               <div className="relative ml-1">
                 <button
                   onClick={() => setOpenProfile(v => !v)}
@@ -203,8 +232,8 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                 {openProfile && (
                   <MenuCard align="right">
                     <MenuItem title="Profile" href={routeUrl('profile.edit', '/profile')} />
-                    {isAdmin && <MenuItem title="Admin-Panel" href="/admin/users" />}
-                    {isRunner && <MenuItem title="User-Panel" href="/runner/users" />}
+                    {isAdmin && <MenuItem title="Admin panel" href="/admin/users" />}
+                    {isRunner && <MenuItem title="Dealer panel" href="/runner/users" />}
                     <MenuItem title="Logout" href={routeUrl('logout', '/logout')} method="post" />
                   </MenuCard>
                 )}
@@ -214,7 +243,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
         </div>
       </div>
 
-      {/* Admin-Tabs (ersetzt in Welcome die Kategorien-Zeile) */}
+      {/* Admin tabs (replaces categories row from Welcome.jsx) */}
       <div className="relative z-10 bg-[#0b1b2b]/85 backdrop-blur supports-[backdrop-filter]:backdrop-blur-md border-y border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="hidden sm:flex items-center gap-2 overflow-x-auto no-scrollbar py-2">
@@ -224,7 +253,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                 onClick={() => setTab(t.key)}
                 className={[
                   'px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition',
-                  tab === t.key ? 'bg-cyan-500 text-black shadow' : 'bg-white/5 hover:bg-white/10 text-white'
+                  tab === t.key ? 'bg-cyan-500 text-white shadow' : 'bg-white/5 hover:bg-white/10 text-white'
                 ].join(' ')}
               >
                 {t.label}
@@ -252,7 +281,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                   onClick={() => { setTab(t.key); setDrawerOpen(false); }}
                   className={[
                     'px-3 py-2 rounded-xl text-sm text-left transition',
-                    tab === t.key ? 'bg-cyan-500 text-black' : 'bg-white/5 hover:bg-white/10'
+                    tab === t.key ? 'bg-cyan-500 text-white' : 'bg-white/5 hover:bg-white/10'
                   ].join(' ')}
                 >
                   {t.label}
@@ -313,7 +342,7 @@ function UsersAdmin({ users, runners }) {
                 <Th>ID</Th>
                 <Th>User</Th>
                 <Th>Role</Th>
-                <Th>Runner</Th>
+                <Th>Dealer</Th>
                 <Th className="text-right">Balance</Th>
                 <Th>Actions</Th>
               </tr>
@@ -366,7 +395,7 @@ function UserRow({ user, runners }) {
       await postPromise(roleForm, action);
     }
 
-    // 2) Runner assignment (only if target role is User)
+    // 2) Dealer assignment (only if target role is User)
     const targetRole = roleForm.data.role || user.role || 'User';
     const canAssignRunner = targetRole === 'User';
     const desiredRunnerId = canAssignRunner ? (runnerForm.data.runner_id || '') : '';
@@ -421,7 +450,7 @@ function UserRow({ user, runners }) {
           className="rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
         >
           <option value="User">User</option>
-          <option value="Runner">Runner</option>
+          <option value="Runner">Dealer</option>
           <option value="Admin">Admin</option>
         </select>
         {roleForm.errors.role && <div className="text-rose-300 text-xs mt-1">{roleForm.errors.role}</div>}
@@ -452,12 +481,12 @@ function UserRow({ user, runners }) {
             value={balanceForm.data.amount}
             onChange={(e)=>balanceForm.setData('amount', e.target.value)}
             className="w-28 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
-            max="500" /* UI-Hardcap; Server prüft echte Limits */
+            max="500" /* UI cap; server enforces real limits */
           />
           <button
             onClick={applyAll}
             disabled={roleForm.processing || runnerForm.processing || balanceForm.processing}
-            className="px-3 py-1.5 rounded-lg bg-green-400 text-black text-sm font-semibold hover:brightness-110 disabled:opacity-60"
+            className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60"
             title="Apply all changes"
           >
             Apply
@@ -480,7 +509,7 @@ function UserRow({ user, runners }) {
 function LogsAdmin({ logs }) {
   const [q, setQ] = useState('');
 
-  // Alle 4s nur die Logs per Partial-Reload nachladen.
+  // Refresh the logs every 4 seconds via partial reload.
   useEffect(() => {
     const id = setInterval(() => {
       router.reload({ only: ['logs'], preserveState: true, preserveScroll: true });
@@ -507,7 +536,7 @@ function LogsAdmin({ logs }) {
         <div className="flex items-center gap-2">
           <input
             type="search"
-            placeholder="Filter: Benutzer…"
+            placeholder="Filter: user…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
@@ -516,7 +545,7 @@ function LogsAdmin({ logs }) {
             onClick={() => router.reload({ only: ['logs'], preserveState: true, preserveScroll: true })}
             className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10"
           >
-            Aktualisieren
+            Refresh
           </button>
         </div>
       </div>
@@ -525,10 +554,10 @@ function LogsAdmin({ logs }) {
         <table className="min-w-full text-sm">
           <thead className="bg-white/5 text-white/80">
             <tr>
-              <Th className="w-48">Zeit</Th>
-              <Th>Von</Th>
-              <Th>An</Th>
-              <Th className="text-right w-32">Betrag</Th>
+              <Th className="w-48">Time</Th>
+              <Th>From</Th>
+              <Th>To</Th>
+              <Th className="text-right w-32">Amount</Th>
             </tr>
           </thead>
         <tbody>
@@ -555,7 +584,7 @@ function LogsAdmin({ logs }) {
           })}
           {filtered.length === 0 && (
             <tr>
-              <td colSpan={4} className="p-4 text-center text-white/60">Keine Einträge gefunden.</td>
+              <td colSpan={4} className="p-4 text-center text-white/60">No records found.</td>
             </tr>
           )}
         </tbody>
@@ -580,7 +609,7 @@ function LogsAdmin({ logs }) {
   );
 }
 
-/* ============================ Game Logs (Aggregierte Spielstatistiken) ============================ */
+/* ============================ Game Logs (aggregated statistics) ============================ */
 
 function GameLogsAdmin({ gameLogs }) {
   const [q, setQ] = useState('');
@@ -612,7 +641,7 @@ function GameLogsAdmin({ gameLogs }) {
         <div className="flex items-center gap-2">
           <input
             type="search"
-            placeholder="Filter: Spiel oder Provider…"
+            placeholder="Filter: game or provider…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
@@ -621,7 +650,7 @@ function GameLogsAdmin({ gameLogs }) {
             onClick={() => router.reload({ only: ['gameLogs'], preserveState: true, preserveScroll: true })}
             className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10"
           >
-            Aktualisieren
+            Refresh
           </button>
         </div>
       </div>
@@ -630,11 +659,11 @@ function GameLogsAdmin({ gameLogs }) {
         <table className="min-w-full text-sm">
           <thead className="bg-white/5 text-white/80">
             <tr>
-              <Th>Spiel</Th>
+              <Th>Game</Th>
               <Th>Provider</Th>
-              <Th className="text-right w-24">Runden</Th>
-              <Th className="text-right w-32">Einsatz</Th>
-              <Th className="text-right w-32">Gewinn</Th>
+              <Th className="text-right w-24">Rounds</Th>
+              <Th className="text-right w-32">Bet amount</Th>
+              <Th className="text-right w-32">Win</Th>
               <Th className="text-right w-32">Player Result</Th>
               <Th className="text-right w-32">Dealer Profit</Th>
             </tr>
@@ -677,7 +706,7 @@ function GameLogsAdmin({ gameLogs }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={7} className="p-4 text-center text-white/60">Keine Einträge gefunden.</td>
+                <td colSpan={7} className="p-4 text-center text-white/60">No records found.</td>
               </tr>
             )}
           </tbody>
@@ -705,7 +734,7 @@ function GameLogsAdmin({ gameLogs }) {
 
 function InvitesAdmin({ runners }) {
   const { props } = usePage();
-  // Holt den Link aus der Session-Flash (oder direkt, falls du ihn dauerhaft teilst)
+  // Pull the link from flash session (or props if shared permanently)
   const inviteUrl = props?.flash?.invite_url || props?.invite_url || '';
 
   return (
@@ -717,7 +746,7 @@ function InvitesAdmin({ runners }) {
         <InviteResultCard url={inviteUrl} />
       ) : (
         <div className="rounded-xl border border-white/10 p-4 bg-white/5 text-white/80">
-          Nach dem Erstellen erscheint der Invite-Link hier unter dem Formular.
+          After creating an invite, the link will appear below the form.
         </div>
       )}
     </section>
@@ -733,7 +762,7 @@ function InviteForm({ runners }) {
     form.post(action, {
       preserveScroll: true,
       onSuccess: () => {
-        // sanft zur Ergebnis-Karte scrollen
+        // Smooth-scroll to the result card
         requestAnimationFrame(() => {
           document.querySelector('[data-invite-result]')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
         });
@@ -753,13 +782,13 @@ function InviteForm({ runners }) {
           className="mt-1 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2"
         >
           <option value="User">User</option>
-          <option value="Runner">Runner</option>
+          <option value="Runner">Dealer</option>
         </select>
       </label>
 
       {form.data.role === 'User' && (
         <label className="block text-sm">
-          <span className="text-white/80">Assign Runner (optional)</span>
+          <span className="text-white/80">Assign Dealer (optional)</span>
           <select
             name="runner_id"
             value={form.data.runner_id || ''}
@@ -773,7 +802,7 @@ function InviteForm({ runners }) {
       )}
 
       <button disabled={form.processing}
-              className="w-full rounded-lg bg-cyan-400 text-black font-semibold py-2.5 hover:brightness-110 disabled:opacity-60">
+              className="w-full rounded-lg bg-cyan-500 text-white font-semibold py-2.5 hover:brightness-110 disabled:opacity-60">
         {form.processing ? 'Creating…' : 'Create Invite'}
       </button>
 
@@ -783,7 +812,7 @@ function InviteForm({ runners }) {
   );
 }
 
-/* ------- Runner Settings (NEU) ------- */
+/* ------- Dealer settings (new) ------- */
 function RunnerSettingsAdmin({ runners }) {
   const [q, setQ] = useState('');
   const list = Array.isArray(runners) ? runners : [];
@@ -799,7 +828,7 @@ function RunnerSettingsAdmin({ runners }) {
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between mb-3">
-        <h2 className="text-lg font-semibold">Runner Settings</h2>
+        <h2 className="text-lg font-semibold">Dealer Settings</h2>
         <input
           value={q}
           onChange={(e)=>setQ(e.target.value)}
@@ -813,7 +842,7 @@ function RunnerSettingsAdmin({ runners }) {
           <thead className="bg-white/5 text-white/80">
             <tr>
               <Th className="w-20">ID</Th>
-              <Th>Runner</Th>
+              <Th>Dealer</Th>
               <Th>Current Limits</Th>
               <Th>Update</Th>
             </tr>
@@ -855,7 +884,7 @@ function RunnerSettingsAdmin({ runners }) {
   );
 }
 
-/* ------- RunnerLimitsForm ------- */
+/* ------- RunnerLimitsForm (dealer limits UI) ------- */
 function RunnerLimitsForm({ user }) {
   const form = useForm({
     runner_daily_limit: user?.runner_daily_limit ?? 1000,
@@ -897,7 +926,7 @@ function RunnerLimitsForm({ user }) {
       <button
         onClick={save}
         disabled={form.processing}
-        className="px-3 py-1.5 rounded-lg bg-cyan-400 text-black text-sm font-semibold hover:brightness-110 disabled:opacity-60"
+        className="px-3 py-1.5 rounded-lg bg-cyan-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60"
       >
         Save Limits
       </button>
@@ -940,8 +969,8 @@ function Alert({ tone='info', children }) {
   };
   return <div className={`rounded-xl border px-3 py-2 ${map[tone]}`}>{children}</div>;
 }
-function Th({ children, className='' }) { return <th className={`text-left p-2 font-semibold ${className}`}>{children}</th>; }
-function Td({ children, className='' }) { return <td className={`p-2 align-middle ${className}`}>{children}</td>; }
+function Th({ children, className='' }) { return <th className={`text-left p-2 font-semibold text-white ${className}`}>{children}</th>; }
+function Td({ children, className='' }) { return <td className={`p-2 align-middle text-white/80 ${className}`}>{children}</td>; }
 
 /* ------- Avatar / MenuCard / MenuItem wie in Welcome.jsx ------- */
 function Avatar({ imgUrl, initials }) {
@@ -956,7 +985,7 @@ function Avatar({ imgUrl, initials }) {
   ) : (
     <div
       aria-label="Profile avatar"
-      className="h-9 w-9 rounded-full grid place-items-center bg-gradient-to-br from-cyan-400/80 to-emerald-400/80 text-black font-bold ring-2 ring-white/10"
+      className="h-9 w-9 rounded-full grid place-items-center bg-gradient-to-br from-cyan-400/80 to-emerald-400/80 text-white font-bold ring-2 ring-white/10"
     >
       {initials}
     </div>
@@ -980,38 +1009,49 @@ function MenuItem({ title, href, method }) {
 function DotsIcon() { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>); }
 function XIcon() { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
 
-/* ------- InviteResultCard (wie gehabt) ------- */
+/* ------- InviteResultCard ------- */
 function InviteResultCard({ url }) {
   const [copied, setCopied] = React.useState(false);
   const [qrReady, setQrReady] = React.useState(false);
   const [qrFailed, setQrFailed] = React.useState(false);
+  const [fallbackError, setFallbackError] = React.useState(false);
   const canvasRef = React.useRef(null);
 
-  // Externer Fallback-QR (keine Abhängigkeiten nötig)
-  const fallbackQR = `https://api.qrserver.com/v1/create-qr-code/?size=512x512&format=png&data=${encodeURIComponent(url)}`;
+  // External fallback QR (no dependencies required)
+  const fallbackQR = `https://quickchart.io/qr?text=${encodeURIComponent(url)}&size=512&margin=2`;
 
-  // QR lokal über dynamische Lib erzeugen (wenn verfügbar)
+  // Generate QR locally via the QRCode library
   React.useEffect(() => {
     let cancelled = false;
     setQrReady(false);
     setQrFailed(false);
+    setFallbackError(false);
 
-    (async () => {
-      try {
-        const mod = await import(/* @vite-ignore */ 'qrcode').catch(() => null);
-        if (!mod || cancelled) throw new Error('qr-lib-missing');
-        const QRCode = mod.default || mod;
-        await QRCode.toCanvas(canvasRef.current, url, {
-          errorCorrectionLevel: 'M',
-          width: 224,
-          margin: 1,
-          color: { dark: '#000000', light: '#FFFFFF' }
-        });
-        if (!cancelled) setQrReady(true);
-      } catch {
-        if (!cancelled) setQrFailed(true);
+    const canvas = canvasRef.current;
+    if (!canvas) return () => { cancelled = true; };
+
+    const ctx = canvas.getContext('2d');
+    ctx?.clearRect(0, 0, canvas.width, canvas.height);
+
+    QRCode.toCanvas(
+      canvas,
+      url,
+      {
+        errorCorrectionLevel: 'M',
+        width: 224,
+        margin: 1,
+        color: { dark: '#000000', light: '#FFFFFF' },
+      },
+      (err) => {
+        if (cancelled) return;
+        if (err) {
+          console.warn('QR generation failed, falling back to external image.', err);
+          setQrFailed(true);
+        } else {
+          setQrReady(true);
+        }
       }
-    })();
+    );
 
     return () => { cancelled = true; };
   }, [url]);
@@ -1034,7 +1074,7 @@ function InviteResultCard({ url }) {
       setCopied(true);
       setTimeout(()=>setCopied(false), 1500);
     } catch {
-      alert('Konnte den Link nicht automatisch kopieren. Markiere den Link und kopiere ihn manuell.');
+      alert('Could not copy the link automatically. Select the link and copy it manually.');
     }
   };
 
@@ -1064,7 +1104,7 @@ function InviteResultCard({ url }) {
 
   return (
     <div data-invite-result className="rounded-2xl border border-white/10 bg-gradient-to-b from-[#0f1f33] to-[#0b1626] p-5">
-      <div className="text-sm text-white/70 mb-2">Invite-Link</div>
+      <div className="text-sm text-white/70 mb-2">Invite link</div>
 
       <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3">
         <div className="flex-1">
@@ -1079,25 +1119,34 @@ function InviteResultCard({ url }) {
         <div className="flex items-center gap-2">
           <button
             onClick={copy}
-            className="px-3 py-2 rounded-lg bg-cyan-400 text-black text-sm font-semibold hover:brightness-110"
+            className="px-3 py-2 rounded-lg bg-cyan-500 text-white text-sm font-semibold hover:brightness-110"
           >
-            {copied ? 'Kopiert ✓' : 'Kopieren'}
+            {copied ? 'Copied ✓' : 'Copy'}
           </button>
           <button
             onClick={downloadLink}
             className="px-3 py-2 rounded-lg bg-white/10 border border-white/15 text-white/90 text-sm hover:bg-white/15"
-            title="Link als Datei speichern"
+            title="Save link as file"
           >
-            Als Datei
+            Download file
           </button>
         </div>
       </div>
 
       <div className="mt-4 flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-5">
         <div className="rounded-xl bg-white p-2 self-start">
-          {qrReady && !qrFailed ? (
-            <canvas ref={canvasRef} width={224} height={224} />
-          ) : (
+          <canvas
+            ref={canvasRef}
+            width={224}
+            height={224}
+            className={qrReady && !qrFailed ? 'block' : 'hidden'}
+          />
+          {!qrReady && !qrFailed && (
+            <div className="grid place-items-center w-[224px] h-[224px] text-xs text-slate-500">
+              Preparing QR…
+            </div>
+          )}
+          {qrFailed && (
             <img
               src={fallbackQR}
               alt="Invite QR Code"
@@ -1105,34 +1154,40 @@ function InviteResultCard({ url }) {
               height={224}
               className="block"
               crossOrigin="anonymous"
+              onError={() => setFallbackError(true)}
             />
+          )}
+          {qrFailed && fallbackError && (
+            <div className="grid place-items-center w-[224px] h-[224px] text-xs text-rose-400 text-center px-2">
+              QR service unavailable. Use "Download directly" or copy the link.
+            </div>
           )}
         </div>
 
         <div className="flex-1">
           <div className="text-white/80 text-sm mb-2">
-            Scanne den Code oder nutze den Link oben, um die Registrierung zu starten.
+            Scan the code or use the link above to start the registration.
           </div>
           <div className="flex items-center gap-2">
             <button
               onClick={downloadQR}
-              className="px-3 py-2 rounded-lg bg-emerald-400 text-black text-sm font-semibold hover:brightness-110"
+              className="px-3 py-2 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110"
             >
-              QR als PNG speichern
+              Download QR as PNG
             </button>
             <a
               href={fallbackQR}
               download="invite-qr.png"
               className="px-3 py-2 rounded-lg bg-white/10 border border-white/15 text-white/90 text-sm hover:bg-white/15"
-              title="Direkt vom QR-Server laden"
+              title="Download directly from the QR server"
             >
-              Direkt laden
+              Download directly
             </a>
           </div>
 
           <div className="text-[11px] text-white/60 mt-2">
-            Hinweis: Lokal wird der QR per Canvas erzeugt. Falls die optionale QR-Lib nicht verfügbar ist,
-            wird automatisch ein externer QR-Dienst verwendet.
+            Note: The QR is rendered locally via canvas. If the optional QR library is unavailable,
+            an external QR service is used automatically.
           </div>
         </div>
       </div>

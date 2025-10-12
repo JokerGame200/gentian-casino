@@ -20,9 +20,11 @@ Route::get('/', fn () => auth()->check()
 
 require __DIR__ . '/auth.php';
 
-Route::get('/welcome', function () {
-    return Inertia::render('Welcome');
-})->name('welcome');
+/**
+ * Exit-URL MUSS öffentlich sein (Provider ruft sie ohne Auth/CSRF auf).
+ * GET ist OK, keine CSRF nötig.
+ */
+Route::get('/games/exit', [GamesApiController::class, 'exit'])->name('games.exit');
 
 // Gäste: Invite
 Route::middleware('guest')->group(function () {
@@ -32,15 +34,16 @@ Route::middleware('guest')->group(function () {
         ->middleware('invite_token')->name('invite.register');
 });
 
-Route::middleware(['web', 'auth'])->group(function () {
-    Route::get('/api/games/list', [GamesApiController::class, 'list']);
-    Route::post('/api/games/open', [GamesApiController::class, 'open']);
-    Route::post('/api/games/close', [GamesApiController::class, 'close'])->name('api.games.close');
-});
-
-Route::get('/games/exit', [GamesApiController::class, 'exit'])->name('games.exit');
-
+// Authentifizierter Bereich
 Route::middleware('auth')->group(function () {
+
+    // Welcome (jetzt geschützt)
+    Route::get('/welcome', fn () => Inertia::render('Welcome'))->name('welcome');
+
+    // ---- GAMES API (über web.php, mit CSRF & Session) ----
+    Route::get('/api/games/list',  [GamesApiController::class, 'list'])->name('api.games.list');
+    Route::post('/api/games/open', [GamesApiController::class, 'open'])->name('api.games.open');
+    Route::post('/api/games/close',[GamesApiController::class, 'close'])->name('api.games.close');
 
     // Breeze Profile
     Route::get('/profile',  [ProfileController::class, 'edit'])->name('profile.edit');
@@ -50,7 +53,7 @@ Route::middleware('auth')->group(function () {
     // Avatar-Placeholder
     Route::get('/avatar/placeholder', [AvatarController::class, 'placeholder'])->name('avatar.placeholder');
 
-    // ---------- BALANCE (JSON Polling) ----------
+    // ---------- BALANCE (JSON / Polling) ----------
     Route::get('/api/me/balance', [BalanceController::class, 'me'])->name('api.me.balance');
     Route::get('/api/me', function (Request $request) {
         $u = $request->user();
@@ -88,9 +91,8 @@ Route::middleware('auth')->group(function () {
     Route::post('/users/{user}/balance', [BalanceController::class, 'update'])
         ->middleware('role:Admin|Runner')->name('balance.update');
 
-    // Welcome & Dashboard (verifiziert)
+    // Dashboard (verifiziert)
     Route::middleware('verified')->group(function () {
-        
         Route::get('/dashboard', function () {
             $user = auth()->user();
             if (method_exists($user, 'hasRole')) {

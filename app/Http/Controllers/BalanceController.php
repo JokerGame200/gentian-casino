@@ -33,18 +33,18 @@ class BalanceController extends Controller
 
         $amount = round((float) $data['amount'], 2);
 
-        // ==== Runner erkennen (Spatie ODER role-Spalte) ====
+        // ==== Detect dealers (Spatie or role column) ====
         $isRunner = (method_exists($actor, 'hasRole') && $actor->hasRole('Runner'))
                 || (($actor->role ?? null) === 'Runner');
 
         if ($isRunner) {
-            // nur zugewiesene User
+            // only assigned users
             if ((int)($user->runner_id ?? 0) !== (int)$actor->id) {
-                return back()->with('error', 'Dieser User ist dir nicht zugewiesen.');
+                return back()->with('error', 'This user is not assigned to you.');
             }
-            // nur gutschreiben
+            // only add funds
             if ($amount <= 0) {
-                return back()->with('error', 'Runner dürfen hier nur Guthaben hinzufügen (positiver Betrag).');
+                return back()->with('error', 'Dealers can only add funds here (positive amounts).');
             }
 
             $perUserLimit = (float)($actor->runner_per_user_limit ?? 500);
@@ -70,13 +70,13 @@ class BalanceController extends Controller
             $maxAllowed       = min($remainingDay, $remainingPerUser);
 
             if ($remainingDay <= 0) {
-                return back()->with('error', 'Tageslimit erreicht.');
+                return back()->with('error', 'Daily limit reached.');
             }
             if ($remainingPerUser <= 0) {
-                return back()->with('error', 'User-Tageslimit erreicht.');
+                return back()->with('error', 'User daily limit reached.');
             }
             if ($amount > $maxAllowed + 1e-6) {
-                return back()->with('error', 'Maximal heute noch zulässig: ' . number_format($maxAllowed, 2, ',', '.') . ' €.');
+                return back()->with('error', 'Maximum remaining today: €' . number_format($maxAllowed, 2, '.', ','));
             }
         }
 
@@ -93,7 +93,7 @@ class BalanceController extends Controller
             ]);
         });
 
-        return back()->with('success', 'Balance aktualisiert.');
+        return back()->with('success', 'Balance updated.');
     }
 
     /**
@@ -123,7 +123,7 @@ class BalanceController extends Controller
             $log->save();
         });
 
-        return back()->with('success', 'Balance aktualisiert.');
+        return back()->with('success', 'Balance updated.');
     }
 
     /**

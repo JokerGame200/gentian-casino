@@ -9,7 +9,7 @@ use Illuminate\Support\Facades\Http;
 class GamesFetchImages extends Command
 {
     protected $signature = 'games:fetch-images {--force} {--only=*} {--limit=}';
-    protected $description = 'Lädt Spiel-Thumbnails lokal nach public/assets/games/{game_id}.jpg';
+    protected $description = 'Download game thumbnails to public/assets/games/{game_id}.jpg';
 
     public function handle(): int
     {
@@ -37,12 +37,12 @@ class GamesFetchImages extends Command
                 file_put_contents($dest, $resp->body());
                 $ok++;
             } catch (\Throwable $e) {
-                $this->warn("Fehler bei {$game->game_id}: ".$e->getMessage());
+                $this->warn("Failed for {$game->game_id}: ".$e->getMessage());
                 $err++;
             }
         }
 
-        $this->info("Bilder: total={$count}, geladen={$ok}, übersprungen={$skip}, fehler={$err}");
+        $this->info("Images: total={$count}, downloaded={$ok}, skipped={$skip}, failed={$err}");
         return self::SUCCESS;
     }
 }

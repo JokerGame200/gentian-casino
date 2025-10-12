@@ -13,7 +13,7 @@ const HIDE_SCROLLBAR_CSS = `
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 `;
 
-// Dark-Theme für Breeze-Formulare + Akzentfarbe für Überschriften
+// Dark theme for Breeze forms + headline accent color
 const PROFILE_CSS = `
 .profile-scope label { color: #e5e7eb; }
 .profile-scope .text-gray-600, .profile-scope .text-gray-700 { color: rgba(255,255,255,.85) !important; }
@@ -27,7 +27,7 @@ const PROFILE_CSS = `
 .profile-scope .border-gray-300 { border-color: rgba(255,255,255,.18) !important; }
 .profile-scope .ring-1, .profile-scope .ring { box-shadow: none !important; }
 
-/* Überschriften-Akzent — gleiches "Blau" wie die Reiter (Tailwind cyan-500) */
+/* Headline accent — same "blue" as the tabs (Tailwind cyan-500) */
 .accent-headings { --heading-color: #06b6d4; }
 .accent-headings h1,
 .accent-headings h2,
@@ -37,7 +37,7 @@ const PROFILE_CSS = `
 .accent-headings h6 { color: var(--heading-color) !important; }
 `;
 
-// Format für Balance
+// Format currency helper
 function formatCurrency(v, cur) {
   try {
     return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur }).format(Number(v ?? 0));
@@ -70,11 +70,11 @@ export default function Edit({ mustVerifyEmail, status }) {
           balanceText={formatCurrency(balance, currency)}
         />
 
-        {/* Überschriften im Reiter-Blau */}
+        {/* Headline accent */}
         <main className="accent-headings max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 pb-24">
           <div className="h-4" />
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">Profile</h1>
-          <p className="text-white/70 mt-1">Verwalte deine Kontoinformationen, Passwort und Konto-Löschung.</p>
+          <p className="text-white/70 mt-1">Manage your account information, password, and account deletion.</p>
 
           <div className="space-y-6 mt-8 profile-scope">
             <div className="bg-[#0f2236] border border-white/10 shadow rounded-2xl p-4 sm:p-8">
@@ -95,14 +95,14 @@ export default function Edit({ mustVerifyEmail, status }) {
   );
 }
 
-/* ------------------------------ Header (ohne Reiter) ------------------------------ */
+/* ------------------------------ Header (no tabs) ------------------------------ */
 
 function Header({ user, initials, balanceText }) {
   const [openProfile, setOpenProfile] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const headerRef = useRef(null);
 
-  // Rollen ableiten
+  // Derive roles
   const roleNames = [];
   if (user?.role) roleNames.push(user.role);
   if (Array.isArray(user?.roles)) {
@@ -146,8 +146,11 @@ function Header({ user, initials, balanceText }) {
                 <img
                   src="/img/play4cash-logo-horizontal.svg"
                   alt="play4cash"
-                  className="h-6 w-auto select-none"
+                  className="h-8 sm:h-10 lg:h-12 w-auto select-none drop-shadow-[0_8px_24px_rgba(34,211,238,0.35)]"
                   draggable="false"
+                  loading="eager"
+                  decoding="async"
+                  style={{ imageRendering: '-webkit-optimize-contrast' }}
                 />
               </Link>
             </div>
@@ -163,7 +166,7 @@ function Header({ user, initials, balanceText }) {
                 </span>
               </div>
 
-              {/* Avatar + Menü (kein Button-Nesting) */}
+              {/* Avatar + menu (no button nesting) */}
               <div className="relative ml-1">
                 <button
                   onClick={() => setOpenProfile(v => !v)}
@@ -178,8 +181,8 @@ function Header({ user, initials, balanceText }) {
                 {openProfile && (
                   <MenuCard align="right">
                     <MenuItem title="Profile" href="/profile" />
-                    {isAdmin && <MenuItem title="Admin-Panel" href="/admin/users" />}
-                    {isRunner && <MenuItem title="User-Panel" href="/runner/users" />}
+                    {isAdmin && <MenuItem title="Admin panel" href="/admin/users" />}
+                    {isRunner && <MenuItem title="Dealer panel" href="/runner/users" />}
                     <MenuItem title="Logout" href="/logout" method="post" />
                   </MenuCard>
                 )}

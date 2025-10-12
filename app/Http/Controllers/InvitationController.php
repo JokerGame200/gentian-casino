@@ -67,8 +67,8 @@ class InvitationController extends Controller
         Auth::login($user);
 
         return $user->hasRole('Runner')
-            ? redirect()->route('runner.users')->with('success', 'Willkommen! Hier sind deine zugewiesenen Nutzer.')
-            : redirect()->route('dashboard')->with('success', 'Registrierung erfolgreich.');
+            ? redirect()->route('runner.users')->with('success', 'Welcome! Here are the users assigned to you.')
+            : redirect()->route('dashboard')->with('success', 'Registration successful.');
     }
 
     /**
@@ -102,8 +102,8 @@ class InvitationController extends Controller
         $url = route('invite.show', ['token' => $invite->token]);
 
         return back()
-            ->with('invite_url', $url) // <- wichtig für die Anzeige unter dem Formular
-            ->with('success', 'Invite-Link erstellt.');
+            ->with('invite_url', $url) // <- important for displaying the link below the form
+            ->with('success', 'Invite link created.');
     }
 
     /**

@@ -11,17 +11,27 @@ const PERF_CSS = `
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 .touch-momentum { -webkit-overflow-scrolling: touch; }
+html, body { background-color: #0a1726; min-height: 100%; }
 @supports (content-visibility: auto) {
   .island { content-visibility: auto; contain-intrinsic-size: 800px 450px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .scroll-smooth { scroll-behavior: auto !important; }
 }
-.body-game-open { overflow: hidden; }
+.body-game-open { overflow: hidden; touch-action: none; }
+:root { --viewport-vh: 100vh; --overlay-vh: 100vh; }
+@supports (height: 100dvh) {
+  :root { --viewport-vh: 100dvh; --overlay-vh: 100dvh; }
+}
+.overlay-fullscreen {
+  width: 100vw;
+  height: var(--overlay-vh, var(--viewport-vh, 100vh));
+  min-height: var(--overlay-vh, var(--viewport-vh, 100vh));
+}
 `;
 
 const PROVIDER_TABS = [
-  'Home','rubyplay','hacksaw','3oaks','aristocrat','egaming','pragmatic','microgaming','novomatic',
+  'Home','All','rubyplay','hacksaw','3oaks','aristocrat','egaming','pragmatic','microgaming','novomatic',
   'jili','scientific_games','booming','firekirin','pgsoft','zitro','playngo','amatic','apollo',
   'fish','kajot','vegas','ainsworth','quickspin','NetEnt','habanero','igt','igrosoft','apex',
   'merkur','wazdan','egt','roulette','bingo','keno','table_games'
@@ -136,9 +146,22 @@ const TRANSPARENT_PX =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y1Q7u8AAAAASUVORK5CYII=';
 const IMAGE_PREFETCH_CACHE = new Set();
 
-const LazyImage = memo(function LazyImage({ src, alt, className, style }) {
+const LazyImage = memo(function LazyImage({
+  src,
+  alt,
+  className,
+  style,
+  loading = 'lazy',
+  fetchPriority = 'low',
+}) {
   const imgRef = useRef(null);
   const [inView, setInView] = useState(false);
+  const [loaded, setLoaded] = useState(false);
+
+  useEffect(() => {
+    setLoaded(false);
+  }, [src]);
+
   useEffect(() => {
     const el = imgRef.current; if (!el) return;
     if (!supportsIntersectionObserver) {
@@ -151,16 +174,26 @@ const LazyImage = memo(function LazyImage({ src, alt, className, style }) {
     io.observe(el);
     return () => io.disconnect();
   }, []);
+
+  const targetOpacity = inView && loaded ? 1 : 0.25;
+
   return (
     <img
       ref={imgRef}
       src={inView ? src : TRANSPARENT_PX}
       alt={alt}
       className={className}
-      style={style}
-      loading="lazy"
+      style={{
+        opacity: targetOpacity,
+        transition: 'opacity 160ms ease-out',
+        willChange: 'opacity',
+        ...style,
+      }}
+      loading={loading}
       decoding="async"
-      fetchpriority="low"
+      fetchpriority={fetchPriority}
+      onLoad={() => setLoaded(true)}
+      onError={() => setLoaded(true)}
     />
   );
 });
@@ -293,6 +326,51 @@ export default function Welcome() {
   const { props } = usePage();
   const user = props?.auth?.user || {};
   const preconnectRef = useRef(new Set());
+  const viewportVarsRef = useRef({ height: 0 });
+  const windowSize = useWindowSize();
+  const isCompactLayout = windowSize.w ? windowSize.w < 768 : false;
+  const prefetchInitial = isCompactLayout ? 24 : 64;
+  const syncViewportVars = useCallback(() => {
+    if (!hasWindow || !hasDocument) return;
+    const visualViewport = window.visualViewport;
+    const rawHeight = visualViewport?.height ?? window.innerHeight;
+    const viewportHeight = Math.round((rawHeight || 0) * 1000) / 1000;
+    if (!viewportHeight) return;
+    if (Math.abs(viewportVarsRef.current.height - viewportHeight) < 0.5) return;
+    viewportVarsRef.current.height = viewportHeight;
+    document.documentElement.style.setProperty('--viewport-vh', `${viewportHeight}px`);
+    document.documentElement.style.setProperty('--overlay-vh', `${viewportHeight}px`);
+  }, []);
+  const syncViewportVarsThrottled = useRafThrottle(syncViewportVars);
+  useLayoutEffect(() => {
+    syncViewportVars();
+  }, [syncViewportVars]);
+  useEffect(() => {
+    if (!hasWindow || !hasDocument) return;
+
+    const visualViewport = window.visualViewport;
+    syncViewportVars();
+
+    const onOrientationChange = () => syncViewportVars();
+    const onViewportResize = () => syncViewportVarsThrottled();
+    if (visualViewport) {
+      visualViewport.addEventListener('resize', onViewportResize);
+    } else {
+      window.addEventListener('resize', onViewportResize, { passive: true });
+    }
+    window.addEventListener('orientationchange', onOrientationChange, { passive: true });
+    return () => {
+      if (visualViewport) {
+        visualViewport.removeEventListener('resize', onViewportResize);
+      } else {
+        window.removeEventListener('resize', onViewportResize);
+      }
+      window.removeEventListener('orientationchange', onOrientationChange);
+      document.documentElement.style.removeProperty('--viewport-vh');
+      document.documentElement.style.removeProperty('--overlay-vh');
+      viewportVarsRef.current.height = 0;
+    };
+  }, [syncViewportVars, syncViewportVarsThrottled]);
 
   // Live-Balance
   const [liveBalance, setLiveBalance] = useState(Number(user.balance ?? 0));
@@ -353,7 +431,7 @@ export default function Welcome() {
         if (alive) {
           const normalized = normalizeAndDedupe(list);
           setGames(normalized);
-          setGamesError(list.length ? '' : 'Keine Spiele gefunden.');
+          setGamesError(list.length ? '' : 'No games found.');
         }
       } catch {
         if (alive) setGamesError('Fehler beim Laden der Spiele.');
@@ -368,7 +446,7 @@ export default function Welcome() {
   const [selectedCat, setSelectedCat] = useState(PROVIDER_TABS[0]);
   const providerTabs = PROVIDER_TABS;
   const normalizedSelectedCat = useMemo(() => {
-    if (!selectedCat || selectedCat === 'Home') return '';
+    if (!selectedCat || selectedCat === 'Home' || selectedCat === 'All') return '';
     return normalizeSlug(selectedCat);
   }, [selectedCat]);
   const prettySelectedCat = useMemo(
@@ -376,6 +454,7 @@ export default function Welcome() {
     [selectedCat]
   );
   const isHomeTab = selectedCat === 'Home';
+  const isAllTab = selectedCat === 'All';
   const [queries, setQueries] = useState({});
   const q = queries[selectedCat] ?? '';
   const dq = useDeferredValue(q);
@@ -403,6 +482,17 @@ export default function Welcome() {
     }
     return out;
   }, [games, normalizedSelectedCat, dq]);
+  const collator = useMemo(() => new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }), []);
+  const alphabeticalGames = useMemo(() => {
+    if (!Array.isArray(filteredGames) || filteredGames.length === 0) return filteredGames;
+    const forSort = filteredGames.slice();
+    forSort.sort((a, b) => {
+      const nameA = a?._nameN || a?.name || '';
+      const nameB = b?._nameN || b?.name || '';
+      return collator.compare(nameA, nameB);
+    });
+    return forSort;
+  }, [filteredGames, collator]);
 
   const providers = useMemo(() => {
     const by = new Map();
@@ -413,8 +503,54 @@ export default function Welcome() {
     }
     return [...by.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [filteredGames]);
+  const orderedBestOfProviders = useMemo(() => {
+    if (!providers.length) return [];
+    const remaining = [...providers];
+    const result = [];
+    const seen = new Set();
+    const pushEntry = (entry, preferredTab = null) => {
+      if (!entry) return;
+      const [name, list] = entry;
+      if (seen.has(name) || !Array.isArray(list) || list.length === 0) return;
+      seen.add(name);
+      const normalizedName = normalizeSlug(name);
+      let targetTab = preferredTab;
+      if (!targetTab) {
+        targetTab = PROVIDER_TABS.find((tab) => {
+          if (!tab || tab === 'Home' || tab === 'All') return false;
+          return matchesProviderSlug(normalizeSlug(tab), normalizedName);
+        }) || null;
+      }
+      result.push({ name, list, tab: targetTab || name });
+    };
+    for (const tab of PROVIDER_TABS) {
+      if (!tab || tab === 'Home' || tab === 'All') continue;
+      const normalizedTab = normalizeSlug(tab);
+      const matchIndex = remaining.findIndex(([name]) => matchesProviderSlug(normalizeSlug(name), normalizedTab));
+      if (matchIndex >= 0) {
+        pushEntry(remaining[matchIndex], tab);
+        remaining.splice(matchIndex, 1);
+      }
+    }
+    for (const entry of remaining) pushEntry(entry);
+    return result;
+  }, [providers]);
+  const goToTab = useCallback((tab) => {
+    if (!tab) return;
+    setSelectedCat(tab);
+    if (hasWindow) {
+      try {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      } catch {
+        window.scrollTo(0, 0);
+      }
+    }
+  }, [setSelectedCat]);
 
-  usePrefetchImages(filteredGames, { initialCount: Math.min(filteredGames.length || 0, 64), onlyIOS: false });
+  usePrefetchImages(filteredGames, {
+    initialCount: Math.min(filteredGames.length || 0, prefetchInitial),
+    onlyIOS: false,
+  });
   useEffect(() => {
     if (!hasDocument || !hasWindow) return;
     const head = document.head;
@@ -451,9 +587,175 @@ export default function Welcome() {
 
   // ------------ Spiel öffnen (Overlay iFrame) ------------
   const [overlay, setOverlay] = useState(null); // { url, sessionId }
+  const overlayRef = useRef(null);
+  const iframeRef = useRef(null);
+  const lastClosedSessionIdRef = useRef(null);
+
+  const closeSession = useCallback((sessionId) => {
+    if (!sessionId) return;
+    if (lastClosedSessionIdRef.current === sessionId) return;
+    lastClosedSessionIdRef.current = sessionId;
+
+    const payload = JSON.stringify({ sessionId });
+    const url = '/api/games/close';
+
+    if (hasNavigator && typeof navigator.sendBeacon === 'function' && typeof Blob !== 'undefined') {
+      try {
+        const sent = navigator.sendBeacon(url, new Blob([payload], { type: 'application/json' }));
+        if (sent) return;
+      } catch {
+        // Fallback zu fetch unten
+      }
+    }
+
+    if (hasWindow && typeof fetch === 'function') {
+      fetch(url, {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+        },
+        body: payload,
+        keepalive: true,
+      }).catch(() => {});
+    }
+  }, []);
+
+  const closeOverlay = useCallback((options = {}) => {
+    const { skipHistory = false } = options;
+    const currentOverlay = overlayRef.current;
+
+    if (currentOverlay?.sessionId) {
+      closeSession(currentOverlay.sessionId);
+    }
+
+    if (currentOverlay) {
+      setOverlay(null);
+    }
+
+    if (hasDocument) {
+      document.body.classList.remove('body-game-open');
+    }
+
+    if (!skipHistory && currentOverlay && hasWindow) {
+      try { history.back(); } catch {}
+    }
+  }, [closeSession]);
+
+  useEffect(() => { overlayRef.current = overlay; }, [overlay]);
+  useLayoutEffect(() => {
+    if (!overlay || !hasWindow || !hasDocument) return;
+
+    const visualViewport = window.visualViewport;
+    const setOverlayHeight = () => {
+      const viewportHeight = visualViewport?.height ?? window.innerHeight;
+      document.documentElement.style.setProperty('--overlay-vh', `${viewportHeight}px`);
+    };
+
+    setOverlayHeight();
+
+    const onResize = () => setOverlayHeight();
+    window.addEventListener('resize', onResize, { passive: true });
+    window.addEventListener('orientationchange', onResize, { passive: true });
+    if (visualViewport) {
+      visualViewport.addEventListener('resize', onResize);
+    }
+
+    try {
+      window.scrollTo({ top: 0, left: 0, behavior: 'auto' });
+    } catch {
+      try { window.scrollTo(0, 0); } catch {}
+    }
+
+    const frame = iframeRef.current;
+    if (frame && typeof frame.requestFullscreen === 'function') {
+      frame.requestFullscreen().catch(() => {});
+    }
+
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+      if (visualViewport) {
+        visualViewport.removeEventListener('resize', onResize);
+      }
+      document.documentElement.style.removeProperty('--overlay-vh');
+    };
+  }, [overlay]);
+  useEffect(() => { lastClosedSessionIdRef.current = null; }, [overlay?.sessionId]);
   useEffect(() => {
-    const onPop = () => { if (document.body.classList.contains('body-game-open')) closeOverlay(); };
-    window.addEventListener('popstate', onPop);
+    if (!overlay) return;
+
+    const onEsc = (event) => {
+      if (event.key === 'Escape') {
+        if (typeof event.preventDefault === 'function') event.preventDefault();
+        closeOverlay();
+      }
+    };
+
+    window.addEventListener('keydown', onEsc, true);
+    if (hasDocument) {
+      document.addEventListener('keydown', onEsc, true);
+    }
+
+    const frame = iframeRef.current;
+    let frameWindow = null;
+    const attachFrameListener = () => {
+      if (!frame) return;
+      try {
+        frameWindow = frame.contentWindow || null;
+        frameWindow?.addEventListener?.('keydown', onEsc, true);
+      } catch {
+        frameWindow = null;
+      }
+    };
+
+    if (frame) {
+      frame.addEventListener?.('load', attachFrameListener);
+      attachFrameListener();
+    }
+
+    return () => {
+      window.removeEventListener('keydown', onEsc, true);
+      if (hasDocument) {
+        document.removeEventListener('keydown', onEsc, true);
+      }
+      if (frame) {
+        frame.removeEventListener?.('load', attachFrameListener);
+      }
+      try {
+        frameWindow?.removeEventListener?.('keydown', onEsc, true);
+      } catch {}
+    };
+  }, [overlay, closeOverlay]);
+
+  useEffect(() => {
+    if (!overlay || !hasDocument) return;
+
+    const onFullscreenChange = () => {
+      const activeOverlay = overlayRef.current;
+      const fsElement = document.fullscreenElement || document.webkitFullscreenElement;
+      if (!fsElement && activeOverlay) {
+        closeOverlay();
+      }
+    };
+
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+    };
+  }, [overlay, closeOverlay]);
+
+  useEffect(() => {
+    const onPop = () => {
+      if (overlayRef.current) {
+        closeOverlay({ skipHistory: true });
+      }
+    };
     const onMsg = (e) => {
       const d = e?.data;
       if (d === 'closeGame' || d === 'close' || d === 'notifyCloseContainer' ||
@@ -461,9 +763,40 @@ export default function Welcome() {
         closeOverlay();
       }
     };
+
+    window.addEventListener('popstate', onPop);
     window.addEventListener('message', onMsg);
-    return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('message', onMsg); };
-  }, []);
+
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      window.removeEventListener('message', onMsg);
+    };
+  }, [closeOverlay]);
+
+  const activeSessionId = overlay?.sessionId || null;
+  useEffect(() => {
+    if (!activeSessionId || !hasWindow) return undefined;
+
+    const handleBeforeUnload = () => closeSession(activeSessionId);
+    const handleVisibility = () => {
+      if (!hasDocument) return;
+      if (document.visibilityState === 'hidden') {
+        closeSession(activeSessionId);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    window.addEventListener('pagehide', handleBeforeUnload);
+    window.addEventListener('unload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibility);
+
+    return () => {
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+      window.removeEventListener('pagehide', handleBeforeUnload);
+      window.removeEventListener('unload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibility);
+    };
+  }, [activeSessionId, closeSession]);
 
   const openGame = useCallback(async (gameId, options = {}) => {
     try {
@@ -485,34 +818,41 @@ export default function Welcome() {
       const withoutFrame = String(data.withoutFrame ?? '0') === '1';
       if (!withoutFrame) {
         setOverlay({ url: data.url, sessionId: data.sessionId || null });
-        document.body.classList.add('body-game-open');
-        try { history.pushState({ g: gameId }, '', window.location.href); } catch {}
+        if (hasDocument) {
+          document.body.classList.add('body-game-open');
+        }
+        if (hasWindow) {
+          try { history.pushState({ g: gameId }, '', window.location.href); } catch {}
+        }
       } else {
         window.location.assign(data.url);
       }
     } catch (e) {
-      alert(e?.message || 'Spiel konnte nicht geöffnet werden.');
+      alert(e?.message || 'Unable to launch the game.');
     }
   }, []);
 
 
-  const closeOverlay = useCallback(() => {
-    setOverlay(null);
-    document.body.classList.remove('body-game-open');
-    try { history.back(); } catch {}
-  }, []);
-
-  const searchPlaceholder = isHomeTab ? 'Search games or providers…' : `Search in ${prettySelectedCat || 'games'}…`;
+  const closeOverlayButton = useCallback(() => closeOverlay(), [closeOverlay]);
+  const searchPlaceholder = isHomeTab
+    ? 'Search games or providers…'
+    : isAllTab
+      ? 'Search all games…'
+      : `Search in ${prettySelectedCat || 'games'}…`;
 
   /* ------------------------------ Render ------------------------------ */
   return (
     <AuthenticatedLayout>
       <Head title="Welcome">
         <link rel="icon" type="image/svg+xml" href="/img/play4cash-mark.svg" />
+        <link rel="preload" as="image" href="/img/play4cash-logo-horizontal.svg" type="image/svg+xml" />
       </Head>
       <style dangerouslySetInnerHTML={{ __html: PERF_CSS }} />
 
-      <div className="min-h-screen bg-[#0a1726] text-white selection:bg-cyan-400/30">
+      <div
+        className="min-h-screen bg-[#0a1726] text-white selection:bg-cyan-400/30"
+        style={{ minHeight: 'var(--viewport-vh, 100vh)' }}
+      >
         <Header
           user={user}
           initials={initials}
@@ -537,12 +877,48 @@ export default function Welcome() {
                   title="All Games"
                   items={filteredGames}
                   onPlay={openGame}
-                  rightNode={<SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} />}
+                  rightNode={(
+                    <button
+                      type="button"
+                      onClick={() => goToTab('All')}
+                      className="px-3 py-1.5 rounded-lg border border-white/15 text-sm font-semibold text-white/80 hover:bg-white/10 transition"
+                    >
+                      Show all
+                    </button>
+                  )}
+                  isCompact={isCompactLayout}
                 />
-                {providers.slice(0, 6).map(([providerName, list]) => (
-                  <SectionCarousel key={providerName} title={`Best of ${providerName}`} items={list} onPlay={openGame} />
-                ))}
+                {orderedBestOfProviders.map(({ name: providerName, list, tab }) => {
+                  const targetTab = providerTabs.includes(tab) ? tab : null;
+                  return (
+                    <SectionCarousel
+                      key={providerName}
+                      title={`Best of ${providerName}`}
+                      items={list}
+                      onPlay={openGame}
+                      isCompact={isCompactLayout}
+                      rightNode={
+                        targetTab ? (
+                          <button
+                            type="button"
+                            onClick={() => goToTab(targetTab)}
+                            className="px-3 py-1.5 rounded-lg border border-white/15 text-sm font-semibold text-white/80 hover:bg-white/10 transition"
+                          >
+                            Show all
+                          </button>
+                        ) : null
+                      }
+                    />
+                  );
+                })}
               </>
+            ) : isAllTab ? (
+              <SectionGridVirtualized
+                title="All Games"
+                items={alphabeticalGames}
+                onPlay={openGame}
+                rightNode={<SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} />}
+              />
             ) : (
               <SectionGridVirtualized
                 title={`${prettySelectedCat || selectedCat} Games`}
@@ -558,22 +934,29 @@ export default function Welcome() {
 
       {/* Game Overlay (iFrame) */}
       {overlay && (
-        <div className="fixed inset-0 z-[100] bg-black/90">
-          <button
-            onClick={closeOverlay}
-            className="absolute top-3 left-3 z-[110] px-3 py-1.5 rounded-lg bg-white text-black text-sm font-semibold"
-            aria-label="Close game"
-          >
-            Close
-          </button>
-          <iframe
-            id="gameFrame"
-            title="Game"
-            src={overlay.url}
-            className="absolute inset-0 w-full h-full border-0"
-            allow="autoplay; fullscreen; clipboard-read; clipboard-write"
-            allowFullScreen
-          />
+        <div
+          className="fixed inset-0 z-[100] bg-black/90 overlay-fullscreen"
+          style={{ height: 'var(--overlay-vh, var(--viewport-vh, 100vh))' }}
+        >
+          <div className="relative w-full h-full">
+            <button
+              onClick={closeOverlayButton}
+              className="absolute top-3 left-3 z-[110] px-3 py-1.5 rounded-lg bg-white text-black text-sm font-semibold"
+              aria-label="Close game"
+            >
+              Close
+            </button>
+            <iframe
+              ref={iframeRef}
+              id="gameFrame"
+              title="Game"
+              src={overlay.url}
+              className="absolute inset-0 w-full h-full border-0"
+              style={{ minHeight: 'var(--overlay-vh, var(--viewport-vh, 100vh))' }}
+              allow="autoplay; fullscreen; clipboard-read; clipboard-write"
+              allowFullScreen
+            />
+          </div>
         </div>
       )}
     </AuthenticatedLayout>
@@ -615,7 +998,15 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
           <div className="h-14 flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
               <Link href="/welcome" className="flex items-center gap-2 min-w-0" aria-label="Play4Cash home">
-                <img src="/img/play4cash-logo-horizontal.svg" alt="play4cash" className="h-6 w-auto select-none" draggable="false" />
+                <img
+                  src="/img/play4cash-logo-horizontal.svg"
+                  alt="play4cash"
+                  className="h-8 sm:h-10 lg:h-12 w-auto select-none drop-shadow-[0_8px_24px_rgba(34,211,238,0.35)]"
+                  draggable="false"
+                  loading="eager"
+                  decoding="async"
+                  style={{ imageRendering: '-webkit-optimize-contrast' }}
+                />
               </Link>
             </div>
             <div className="flex items-center gap-3 sm:gap-2">
@@ -623,19 +1014,6 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
                 <span className="px-2.5 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-xs font-medium cursor-default" aria-label="Current balance">
                   {balanceText}
                 </span>
-              </div>
-              <div className="relative sm:ml-1">
-                <button onClick={() => setOpenProfile(v => !v)} aria-haspopup="menu" aria-label="Profile menu" aria-expanded={openProfile} className="block">
-                  <Avatar imgUrl={user?.profile_photo_url} initials={initials} />
-                </button>
-                {openProfile && (
-                  <MenuCard align="right">
-                    <MenuItem title="Profile" href="/profile" />
-                    {isAdmin && <MenuItem title="Admin-Panel" href="/admin/users" />}
-                    {isRunner && <MenuItem title="User-Panel" href="/runner/users" />}
-                    <MenuItem title="Logout" href="/logout" method="post" />
-                  </MenuCard>
-                )}
               </div>
               <button
                 type="button"
@@ -649,6 +1027,19 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
                 <span className="px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-sm cursor-default" aria-label="Current balance">
                   {balanceText}
                 </span>
+              </div>
+              <div className="relative sm:ml-1">
+                <button onClick={() => setOpenProfile(v => !v)} aria-haspopup="menu" aria-label="Profile menu" aria-expanded={openProfile} className="block">
+                  <Avatar imgUrl={user?.profile_photo_url} initials={initials} />
+                </button>
+                {openProfile && (
+                  <MenuCard align="right">
+                    <MenuItem title="Profile" href="/profile" />
+                    {isAdmin && <MenuItem title="Admin-Panel" href="/admin/users" />}
+                    {isRunner && <MenuItem title="Dealer panel" href="/runner/users" />}
+                    <MenuItem title="Logout" href="/logout" method="post" />
+                  </MenuCard>
+                )}
               </div>
             </div>
           </div>
@@ -746,15 +1137,69 @@ function Hero() {
 }
 
 /* --------------------------- Carousels --------------------------- */
-function SectionCarousel({ title, items, onPlay, rightNode = null }) {
+function SectionCarousel({ title, items, onPlay, rightNode = null, isCompact = false }) {
   const scrollerRef = useRef(null);
+  const sentinelRef = useRef(null);
   const [canL, setCanL] = useState(false);
   const [canR, setCanR] = useState(true);
+  const initialRenderCount = isCompact ? 24 : 60;
+  const loadStep = isCompact ? 12 : 30;
+  const [renderCount, setRenderCount] = useState(() => Math.min(items.length, initialRenderCount));
+
+  useEffect(() => {
+    setRenderCount(Math.min(items.length, initialRenderCount));
+  }, [items, initialRenderCount]);
+
+  usePrefetchImages(items, {
+    initialCount: Math.min(renderCount, isCompact ? 32 : 72),
+    range: { start: 0, end: renderCount },
+    buffer: isCompact ? 18 : 36,
+    onlyIOS: false,
+  });
+
+  const ensureAhead = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    if (renderCount >= items.length) return;
+    const remainingPx = el.scrollWidth - (el.scrollLeft + el.clientWidth);
+    const thresholdPx = el.clientWidth * (isCompact ? 2 : 3);
+    if (remainingPx <= thresholdPx) {
+      setRenderCount((prev) => {
+        if (prev >= items.length) return prev;
+        return Math.min(items.length, prev + loadStep);
+      });
+    }
+  }, [renderCount, items.length, loadStep, isCompact]);
+
+  useEffect(() => {
+    if (!supportsIntersectionObserver) {
+      setRenderCount((prev) => (prev === items.length ? prev : items.length));
+      return;
+    }
+    if (renderCount >= items.length) return;
+    const node = sentinelRef.current;
+    if (!node) return;
+    const root = scrollerRef.current ?? undefined;
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          setRenderCount((prev) => {
+            if (prev >= items.length) return prev;
+            return Math.min(items.length, prev + loadStep);
+          });
+          break;
+        }
+      }
+    }, { root, rootMargin: isCompact ? '220px' : '120px' });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [items.length, loadStep, isCompact, renderCount]);
 
   const update = useRafThrottle(() => {
     const el = scrollerRef.current; if (!el) return;
     setCanL(el.scrollLeft > 4);
     setCanR(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+    ensureAhead();
   });
 
   useEffect(() => {
@@ -766,6 +1211,10 @@ function SectionCarousel({ title, items, onPlay, rightNode = null }) {
     return () => { el.removeEventListener('scroll', update); window.removeEventListener('resize', onResize); };
   }, [update]);
 
+  useEffect(() => {
+    update();
+  }, [renderCount, update]);
+
   const scrollBy = (dir) => {
     const el = scrollerRef.current; if (!el) return;
     const delta = Math.round(el.clientWidth * 0.9) * (dir === 'left' ? -1 : 1);
@@ -776,7 +1225,11 @@ function SectionCarousel({ title, items, onPlay, rightNode = null }) {
       } catch {}
     }
     el.scrollLeft += delta;
+    ensureAhead();
   };
+
+  const visibleItems = items.slice(0, renderCount);
+  const priorityCutoff = isCompact ? 8 : 12;
 
   return (
     <section aria-label={title} className="island">
@@ -795,7 +1248,18 @@ function SectionCarousel({ title, items, onPlay, rightNode = null }) {
           className="flex gap-3 overflow-x-auto no-scrollbar touch-momentum snap-x snap-mandatory scroll-smooth pr-1"
           style={isIOSDevice ? { WebkitOverflowScrolling: 'touch' } : undefined}
         >
-          {items.map((g) => <GameCard key={gameReactKey(g)} game={g} onPlay={onPlay} variant="carousel" />)}
+          {visibleItems.map((g, idx) => (
+            <GameCard
+              key={gameReactKey(g)}
+              game={g}
+              onPlay={onPlay}
+              variant="carousel"
+              priority={idx < priorityCutoff}
+            />
+          ))}
+          {renderCount < items.length && (
+            <div ref={sentinelRef} className="w-px h-px flex-shrink-0 opacity-0" aria-hidden="true" />
+          )}
         </div>
         <button
           className={`hidden md:grid place-items-center absolute -right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/10 border border-white/15 hover:bg-white/20 transition ${canR ? 'opacity-100' : 'opacity-0 pointer-events-none'} md:group-hover:opacity-100`}
@@ -824,7 +1288,8 @@ function SectionGridVirtualized({ title, items, onPlay, rightNode = null }) {
   }, [items.length]);
 
   usePrefetchImages(displayItems, {
-    initialCount: Math.min(displayItems.length || 0, 64),
+    initialCount: Math.min(displayItems.length || 0, 72),
+    buffer: 24,
     onlyIOS: false,
   });
 
@@ -836,11 +1301,17 @@ function SectionGridVirtualized({ title, items, onPlay, rightNode = null }) {
       </div>
       <div className="rounded-xl border border-white/10 p-3 sm:p-4">
         {displayItems.length === 0 ? (
-          <div className="text-white/60 text-sm">Keine Spiele gefunden.</div>
+          <div className="text-white/60 text-sm">No games found.</div>
         ) : (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-            {displayItems.map((g) => (
-              <GameCard key={gameReactKey(g)} game={g} onPlay={onPlay} variant="grid" />
+            {displayItems.map((g, idx) => (
+              <GameCard
+                key={gameReactKey(g)}
+                game={g}
+                onPlay={onPlay}
+                variant="grid"
+                priority={idx < 12}
+              />
             ))}
           </div>
         )}
@@ -923,7 +1394,7 @@ function gameReactKey(g) {
   if (name) return `name:${p}#${name}`;
   return `${p}-${Math.random().toString(36).slice(2)}`;
 }
-const GameCard = memo(function GameCard({ game, onPlay, variant = 'carousel', heightPx }) {
+const GameCard = memo(function GameCard({ game, onPlay, variant = 'carousel', heightPx, priority = false }) {
   const title = game.name || `Game ${game.id}`;
   const provider = game.provider || 'Provider';
   const img = game.img || TRANSPARENT_PX;
@@ -933,6 +1404,8 @@ const GameCard = memo(function GameCard({ game, onPlay, variant = 'carousel', he
   const cardStyle = variant === 'grid' && heightPx
     ? { height: `${heightPx}px`, backgroundColor: '#10263b', willChange: 'transform' }
     : { aspectRatio: '16 / 9', backgroundColor: '#10263b', willChange: 'transform' };
+  const imageLoadingMode = priority ? 'eager' : 'lazy';
+  const imageFetchPriority = priority ? 'high' : 'low';
   const handlePlay = useCallback(() => {
     onPlay?.(game.id, { demo: false });
   }, [onPlay, game.id]);
@@ -940,7 +1413,14 @@ const GameCard = memo(function GameCard({ game, onPlay, variant = 'carousel', he
     <article className={containerCls} aria-label={title}>
       <div className="relative rounded-xl overflow-hidden group/card bg-[#0d2236] border border-white/10"
            style={cardStyle}>
-        <LazyImage src={img} alt={title} className="absolute inset-0 w-full h-full object-cover" style={{ backgroundColor: '#10263b' }} />
+        <LazyImage
+          src={img}
+          alt={title}
+          className="absolute inset-0 w-full h-full object-cover"
+          style={{ backgroundColor: '#10263b' }}
+          loading={imageLoadingMode}
+          fetchPriority={imageFetchPriority}
+        />
         <div className="absolute left-2 top-2 px-2 py-1 rounded-md bg-black/50 text-[10px] leading-none">{provider}</div>
         <div className="absolute inset-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
           <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/60 to-transparent">
@@ -964,7 +1444,8 @@ const GameCard = memo(function GameCard({ game, onPlay, variant = 'carousel', he
   prev.game === next.game &&
   prev.onPlay === next.onPlay &&
   prev.variant === next.variant &&
-  prev.heightPx === next.heightPx
+  prev.heightPx === next.heightPx &&
+  prev.priority === next.priority
 ));
 
 /* ------------------------------ Footer ------------------------------ */

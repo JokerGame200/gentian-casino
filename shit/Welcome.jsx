@@ -522,7 +522,15 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
           <div className="h-14 flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
               <Link href="/welcome" className="flex items-center gap-2 min-w-0" aria-label="Play4Cash home">
-                <img src="/img/play4cash-logo-horizontal.svg" alt="play4cash" className="h-6 w-auto select-none" draggable="false" />
+                <img
+                  src="/img/play4cash-logo-horizontal.svg"
+                  alt="play4cash"
+                  className="h-8 sm:h-10 lg:h-12 w-auto select-none drop-shadow-[0_8px_24px_rgba(34,211,238,0.35)]"
+                  draggable="false"
+                  loading="eager"
+                  decoding="async"
+                  style={{ imageRendering: '-webkit-optimize-contrast' }}
+                />
               </Link>
             </div>
 

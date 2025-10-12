@@ -7,7 +7,7 @@ import { Transition } from '@headlessui/react';
 import { Link, useForm, usePage } from '@inertiajs/react';
 
 export default function UpdateProfileInformation({ mustVerifyEmail, status, className = '' }) {
-  const user = usePage().props.auth.user; // enthält avatar_url dank Middleware
+  const user = usePage().props.auth.user; // includes avatar_url thanks to middleware
   const fileRef = useRef();
 
   const { data, setData, patch, errors, processing, recentlySuccessful, reset, transform } = useForm({
@@ -17,7 +17,7 @@ export default function UpdateProfileInformation({ mustVerifyEmail, status, clas
     remove_avatar: false,
   });
 
-  // Vorschau-URL (Start = aktuelle avatar_url oder Fallback)
+  // Preview URL (start with current avatar_url or fallback)
   const [preview, setPreview] = useState(user.avatar_url);
 
   useEffect(() => {
@@ -36,23 +36,23 @@ export default function UpdateProfileInformation({ mustVerifyEmail, status, clas
   };
 
   const onRemoveClick = () => {
-    // Entfernen vormerken (Backend setzt avatar=null)
+    // Mark removal (backend will set avatar=null)
     setData('avatar', null);
     setData('remove_avatar', true);
     fileRef.current.value = '';
-    // Fallback auf Initialen-SVG
+    // Fallback to initials SVG
     const params = new URLSearchParams({ name: user.name || 'User', s: 128 });
     setPreview(route('avatar.placeholder') + '?' + params.toString());
   };
 
-  // Wichtig: forceFormData = true, damit Inertia multipart sendet
+  // Important: forceFormData = true so Inertia sends multipart
   const submit = (e) => {
     e.preventDefault();
     patch(route('profile.update'), {
       forceFormData: true,
       preserveScroll: true,
       onSuccess: () => {
-        // wenn erfolgreich & es war ein Blob, Objekt-URL aufräumen
+        // If successful & preview was a blob, clean up object URL
         if (preview?.startsWith('blob:')) URL.revokeObjectURL(preview);
       }
     });
@@ -89,7 +89,7 @@ export default function UpdateProfileInformation({ mustVerifyEmail, status, clas
               onClick={onRemoveClick}
               className="text-sm text-gray-700 underline hover:text-gray-900 self-start"
             >
-              Avatar entfernen (Initialen verwenden)
+              Remove avatar (use initials)
             </button>
             <InputError className="mt-2" message={errors.avatar} />
           </div>

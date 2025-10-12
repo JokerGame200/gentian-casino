@@ -322,20 +322,25 @@ class GamesApiController extends Controller
             $gameId = (string) $request->input('gameId');
             $login  = 'u' . (string) $user->id;
 
-            // Guard: nur eine aktive/opening Session pro Nutzer zulassen.
-            $guardResult = DB::transaction(function () use ($user, $gameId) {
+            $maxActiveSessions = (int) config('gamesapi.max_active_sessions_per_user', 2);
+            if ($maxActiveSessions <= 0) {
+                $maxActiveSessions = null; // null => unbegrenzt
+            }
+
+            // Guard: begrenzte Anzahl aktiver/opening Sessions pro Nutzer zulassen.
+            $guardResult = DB::transaction(function () use ($user, $gameId, $maxActiveSessions) {
                 User::whereKey($user->id)->lockForUpdate()->first();
 
                 $activeSessions = GameSession::where('user_id', $user->id)
                     ->whereIn('status', ['open', 'opening'])
+                    ->orderBy('created_at')
                     ->lockForUpdate()
                     ->get();
 
                 $now = Carbon::now();
                 $staleOpeningBefore = $now->copy()->subMinutes(3);
-                $staleOpenBefore = $now->copy()->subSeconds((int) config('gamesapi.stale_session_grace_seconds', 10));
                 $staleHardBefore = $now->copy()->subMinutes((int) config('gamesapi.stale_session_minutes', 30));
-                $active = null;
+                $active = [];
 
                 foreach ($activeSessions as $candidate) {
                     if ($candidate->status === 'opening'
@@ -362,36 +367,25 @@ class GamesApiController extends Controller
                         continue;
                     }
 
-                    if ($candidate->status === 'open'
-                        && $candidate->updated_at
-                        && $candidate->updated_at->lt($staleOpenBefore)) {
-                        Log::info('GAMES guard auto-closing stale session', [
-                            'user_id'    => $user->id,
-                            'session_id' => $candidate->session_id,
-                            'status'     => $candidate->status,
-                            'updated_at' => $candidate->updated_at,
-                        ]);
-                        if (!$candidate->opened_at) {
-                            $candidate->opened_at = $now;
-                        }
-                        $candidate->status = 'closed';
-                        $candidate->closed_at = $now;
-                        $candidate->save();
-                        continue;
-                    }
-
-                    $active = $candidate;
-                    break;
+                    $active[] = $candidate;
                 }
 
-                if ($active) {
+                if ($maxActiveSessions !== null && count($active) >= $maxActiveSessions) {
+                    /** @var GameSession $blocked */
+                    $blocked = $active[0];
                     Log::info('GAMES open blocked by active session', [
                         'user_id'    => $user->id,
-                        'session_id' => $active->session_id,
-                        'status'     => $active->status,
-                        'updated_at' => $active->updated_at,
+                        'session_id' => $blocked->session_id,
+                        'status'     => $blocked->status,
+                        'updated_at' => $blocked->updated_at,
+                        'active_cnt' => count($active),
+                        'limit'      => $maxActiveSessions,
                     ]);
-                    return ['blocked' => $active];
+                    return [
+                        'blocked'      => $blocked,
+                        'active_count' => count($active),
+                        'limit'        => $maxActiveSessions,
+                    ];
                 }
 
                 $session = GameSession::create([
@@ -404,7 +398,11 @@ class GamesApiController extends Controller
                     'win_total'  => 0,
                 ]);
 
-                return ['session' => $session];
+                return [
+                    'session'      => $session,
+                    'active_count' => count($active),
+                    'limit'        => $maxActiveSessions,
+                ];
             });
 
             if (isset($guardResult['blocked'])) {
@@ -414,6 +412,8 @@ class GamesApiController extends Controller
                     'user_id'    => $user->id,
                     'session_id' => $active->session_id,
                     'status'     => $active->status,
+                    'active_cnt' => $guardResult['active_count'] ?? null,
+                    'limit'      => $guardResult['limit'] ?? null,
                 ]);
                 return response()->json([
                     'status'    => 'fail',

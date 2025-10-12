@@ -1,6 +1,6 @@
 // resources/js/Pages/Auth/RegisterByInvite.jsx
 import React, { useState } from 'react';
-import { Head, Link, useForm, usePage } from '@inertiajs/react';
+import { Head, useForm, usePage } from '@inertiajs/react';
 import GuestLayout from '@/Layouts/GuestLayout';
 
 // Ziggy helpers (safe fallbacks if route names are missing)
@@ -35,16 +35,24 @@ export default function RegisterByInvite({ token }) {
 
   return (
     <GuestLayout>
-      <Head title="Einladung annehmen" />
+      <Head title="Accept invite" />
 
       <div className="min-h-screen bg-[#0a1726] text-white flex items-center justify-center px-4 py-12">
         <div className="w-full max-w-md">
           {/* Header / wordmark */}
           <div className="text-center mb-6">
-            <div className="inline-flex items-center gap-2">
-              <span className="text-xl font-semibold tracking-wide">Next2Win</span>
+            <div className="flex justify-center pl-3 sm:pl-6 md:pl-10">
+              <img
+                src="/img/play4cash-logo-horizontal.svg"
+                alt="play4cash"
+                className="h-10 sm:h-12 w-auto drop-shadow-[0_8px_24px_rgba(34,211,238,0.35)] select-none mx-auto"
+                loading="eager"
+                decoding="async"
+                draggable="false"
+                style={{ imageRendering: '-webkit-optimize-contrast' }}
+              />
             </div>
-            <p className="text-sm text-white/70 mt-1">Account über Einladung erstellen</p>
+            <p className="text-sm text-white/70 mt-1">Create your account via invite</p>
           </div>
 
           {/* Flash messages */}
@@ -65,11 +73,11 @@ export default function RegisterByInvite({ token }) {
 
           {/* Card */}
           <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-[#0f1f33] to-[#0b1626] p-6 shadow-lg">
-            <form onSubmit={submit} className="space-y-4">
+            <form onSubmit={submit} className="space-y-4 max-w-sm mx-auto">
               {/* Username */}
               <div>
                 <label htmlFor="username" className="block text-sm font-medium mb-1">
-                  Benutzername
+                  Username
                 </label>
                 <input
                   id="username"
@@ -88,7 +96,7 @@ export default function RegisterByInvite({ token }) {
               {/* Password */}
               <div>
                 <label htmlFor="password" className="block text-sm font-medium mb-1">
-                  Passwort
+                  Password
                 </label>
                 <div className="relative">
                   <input
@@ -104,7 +112,7 @@ export default function RegisterByInvite({ token }) {
                     type="button"
                     onClick={() => setShowPw((v) => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
-                    aria-label={showPw ? 'Passwort verbergen' : 'Passwort anzeigen'}
+                    aria-label={showPw ? 'Hide password' : 'Show password'}
                   >
                     {showPw ? (
                       // Eye-off
@@ -128,7 +136,7 @@ export default function RegisterByInvite({ token }) {
               {/* Password confirmation */}
               <div>
                 <label htmlFor="password_confirmation" className="block text-sm font-medium mb-1">
-                  Passwort bestätigen
+                  Confirm password
                 </label>
                 <div className="relative">
                   <input
@@ -144,7 +152,7 @@ export default function RegisterByInvite({ token }) {
                     type="button"
                     onClick={() => setShowPw2((v) => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
-                    aria-label={showPw2 ? 'Passwort verbergen' : 'Passwort anzeigen'}
+                    aria-label={showPw2 ? 'Hide password' : 'Show password'}
                   >
                     {showPw2 ? (
                       <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -161,27 +169,21 @@ export default function RegisterByInvite({ token }) {
               </div>
 
               {/* Submit */}
-              <button
-                type="submit"
-                disabled={processing}
-                className="bg-black text-white rounded px-4 py-2 hover:opacity-90 disabled:opacity-60"
-              >
-                {processing ? 'Registriere…' : 'Registrieren'}
-              </button>
+              <div className="flex justify-center">
+                <button
+                  type="submit"
+                  disabled={processing}
+                  className="inline-flex items-center justify-center rounded-lg bg-cyan-500 px-6 py-2.5 text-black font-semibold hover:brightness-110 disabled:opacity-60 transition"
+                >
+                  {processing ? 'Registering…' : 'Register'}
+                </button>
+              </div>
             </form>
-
-            {/* Already have account? */}
-            <div className="mt-5 text-center text-sm text-white/70">
-              Schon ein Konto?{' '}
-              <Link href={routeUrl('login', undefined, '/login')} className="text-cyan-300 hover:text-cyan-200">
-                Jetzt einloggen
-              </Link>
-            </div>
           </div>
 
           {/* Footer hint */}
           <p className="mt-6 text-center text-xs text-white/50">
-            Dieser Einladungslink ist einmalig und kann nach Verwendung ablaufen.
+            This invite link is single use and may expire after redemption.
           </p>
         </div>
       </div>

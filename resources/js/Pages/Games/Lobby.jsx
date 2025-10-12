@@ -130,9 +130,9 @@ export default function Lobby() {
     <div className="lobby">
       <h1>Games</h1>
 
-      {loading && <p style={{opacity:.7}}>Lade Spiele…</p>}
-      {(!loading && loadErr) && <p style={{color:'#f55'}}>Fehler: {loadErr}</p>}
-      {(!loading && !loadErr && games.length === 0) && <p style={{opacity:.7}}>Keine Spiele gefunden.</p>}
+      {loading && <p style={{opacity:.7}}>Loading games…</p>}
+      {(!loading && loadErr) && <p style={{color:'#f55'}}>Error: {loadErr}</p>}
+      {(!loading && !loadErr && games.length === 0) && <p style={{opacity:.7}}>No games found.</p>}
 
       <div className="grid">
         {games.map(g => {

@@ -17,6 +17,31 @@ const HIDE_SCROLLBAR_CSS = `
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
 `;
+const PANEL_TEXT_CSS = `
+.runner-panel { color: rgba(255, 255, 255, 0.9); }
+.runner-panel table td { color: rgba(255, 255, 255, 0.82); }
+.runner-panel table th { color: #ffffff; }
+.runner-panel .text-white\\/90,
+.runner-panel .text-white\\/80,
+.runner-panel .text-white\\/70,
+.runner-panel .text-white\\/60,
+.runner-panel .text-white\\/50,
+.runner-panel .text-white\\/40,
+.runner-panel .text-white\\/30 {
+  color: #ffffff !important;
+}
+.runner-panel .text-black,
+.runner-panel .text-slate-900,
+.runner-panel .text-slate-800,
+.runner-panel .text-slate-700,
+.runner-panel .text-gray-900,
+.runner-panel .text-gray-800,
+.runner-panel .text-gray-700,
+.runner-panel .text-neutral-900,
+.runner-panel .text-neutral-800 {
+  color: #ffffff !important;
+}
+`;
 
 export default function RunnerUsersPage({ users, logs, assigned_user_ids = [] }) {
   const { props } = usePage();
@@ -38,7 +63,7 @@ export default function RunnerUsersPage({ users, logs, assigned_user_ids = [] })
 
   const [tab, setTab] = useState('Users');
 
-  // Auto-refresh nur users+logs, alle 4s
+  // Auto-refresh users + logs every 4 seconds
   useEffect(() => {
     const id = setInterval(() => {
       router.reload({ only: ['users','logs'], preserveState: true, preserveScroll: true });
@@ -48,9 +73,9 @@ export default function RunnerUsersPage({ users, logs, assigned_user_ids = [] })
 
   return (
     <AuthenticatedLayout>
-      <Head title="Runner Panel" />
-      <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS }} />
-      <div className="min-h-screen bg-[#0a1726] text-white">
+      <Head title="Dealer Panel" />
+      <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS + PANEL_TEXT_CSS }} />
+      <div className="min-h-screen bg-[#0a1726] text-white runner-panel">
         <Header
           user={me}
           initials={initials}
@@ -70,14 +95,14 @@ export default function RunnerUsersPage({ users, logs, assigned_user_ids = [] })
   );
 }
 
-/* ============================ Header (gleich wie Welcome, Tabs unten) ============================ */
+/* ============================ Header (mirrors Welcome.jsx) ============================ */
 function Header({ user, initials, balanceText, tab, setTab }) {
   const [openProfile, setOpenProfile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
   const headerRef = useRef(null);
 
-  // Rollen wie in Welcome.jsx erkennen
+  // Derive roles like in Welcome.jsx
   const roleNames = [];
   if (user?.role) roleNames.push(user.role);
   if (Array.isArray(user?.roles)) {
@@ -94,7 +119,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
     return () => window.removeEventListener('scroll', onScroll);
   }, []);
 
-  // außerhalb Klick schließt Profilmenü
+  // Clicking outside closes the profile menu
   useEffect(() => {
     const onDoc = (e) => {
       if (!headerRef.current) return;
@@ -104,7 +129,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
     return () => document.removeEventListener('click', onDoc);
   }, []);
 
-  // ESC schließt Drawer & Menü
+  // ESC closes drawer & menu
   useEffect(() => {
     const onEsc = (e) => {
       if (e.key === 'Escape') {
@@ -120,25 +145,28 @@ function Header({ user, initials, balanceText, tab, setTab }) {
 
   return (
     <div ref={headerRef} className="sticky top-0 z-50">
-      {/* Top bar – aus Welcome.jsx übernommen */}
+      {/* Top bar – reused from Welcome.jsx */}
       <div className={`relative z-20 transition-colors ${scrolled ? 'bg-[#0b1b2b]/80' : 'bg-transparent'} backdrop-blur supports-[backdrop-filter]:backdrop-blur-md shadow-sm`}>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="h-14 flex items-center justify-between">
             <div className="flex items-center gap-3 min-w-0">
-              {/* Wortmarke -> /welcome */}
+              {/* Wordmark -> /welcome */}
               <Link href="/welcome" className="flex items-center gap-2 min-w-0" aria-label="Play4Cash home">
                 <img
                   src="/img/play4cash-logo-horizontal.svg"
                   alt="play4cash"
-                  className="h-6 w-auto select-none"
+                  className="h-8 sm:h-10 lg:h-12 w-auto select-none drop-shadow-[0_8px_24px_rgba(34,211,238,0.35)]"
                   draggable="false"
+                  loading="eager"
+                  decoding="async"
+                  style={{ imageRendering: '-webkit-optimize-contrast' }}
                 />
               </Link>
-              <span className="text-xs ml-2 px-2 py-0.5 rounded bg-white/10 border border-white/10">Runner</span>
+              <span className="text-xs ml-2 px-2 py-0.5 rounded bg-white/10 border border-white/10">Dealer</span>
             </div>
 
             <div className="flex items-center gap-2">
-              {/* Mobile Button wie "Categories" */}
+              {/* Mobile button styled like "Categories" */}
               <button
                 className="sm:hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition"
                 onClick={() => { setDrawerOpen(true); setOpenProfile(false); }}
@@ -148,7 +176,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                 <span className="text-sm">Categories</span>
               </button>
 
-              {/* Guthaben – statisch */}
+              {/* Balance pill */}
               <div className="hidden sm:flex items-center gap-1 mr-2 select-text">
                 <span
                   className="px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-sm cursor-default"
@@ -158,7 +186,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                 </span>
               </div>
 
-              {/* Profil: Avatar-Button + Menü (kein Button-Nesting) */}
+              {/* Profile avatar button + menu (no nested buttons) */}
               <div className="relative ml-1">
                 <button
                   onClick={() => setOpenProfile(v => !v)}
@@ -171,20 +199,20 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                 </button>
 
                 {openProfile && (
-                  <MenuCard align="right">
-                    <MenuItem title="Profile" href={routeUrl('profile.edit','/profile')} />
-                    {isAdmin && <MenuItem title="Admin-Panel" href={routeUrl('admin.users','/admin/users')} />}
-                    {isRunner && <MenuItem title="User-Panel" href={routeUrl('runner.users','/runner/users')} />}
-                    <MenuItem title="Logout" href={routeUrl('logout','/logout')} method="post" />
-                  </MenuCard>
-                )}
+                    <MenuCard align="right">
+                      <MenuItem title="Profile" href={routeUrl('profile.edit','/profile')} />
+                    {isAdmin && <MenuItem title="Admin panel" href={routeUrl('admin.users','/admin/users')} />}
+                    {isRunner && <MenuItem title="Dealer panel" href={routeUrl('runner.users','/runner/users')} />}
+                      <MenuItem title="Logout" href={routeUrl('logout','/logout')} method="post" />
+                    </MenuCard>
+                  )}
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Tabs-Zeile – Stil gleich wie Kategorien-Zeile in Welcome.jsx */}
+      {/* Tabs row – same styling as the categories row in Welcome.jsx */}
       <div className="relative z-10 bg-[#0b1b2b]/85 backdrop-blur supports-[backdrop-filter]:backdrop-blur-md border-y border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="hidden sm:flex items-center gap-2 overflow-x-auto no-scrollbar py-2">
@@ -194,7 +222,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                 onClick={() => setTab(t)}
                 className={[
                   'px-3 py-1.5 rounded-full text-sm whitespace-nowrap transition',
-                  tab === t ? 'bg-cyan-500 text-black shadow' : 'bg-white/5 hover:bg-white/10 text-white'
+                  tab === t ? 'bg-cyan-500 text-white shadow' : 'bg-white/5 hover:bg-white/10 text-white'
                 ].join(' ')}
               >
                 {t}
@@ -204,7 +232,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
         </div>
       </div>
 
-      {/* Mobile Drawer – gleiches Pattern wie Welcome.jsx */}
+      {/* Mobile drawer – same pattern as Welcome.jsx */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 sm:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
@@ -220,7 +248,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
                   onClick={() => { setTab(t); setDrawerOpen(false); }}
                   className={[
                     'px-3 py-2 rounded-xl text-sm text-left transition',
-                    tab === t ? 'bg-cyan-500 text-black' : 'bg-white/5 hover:bg-white/10'
+                    tab === t ? 'bg-cyan-500 text-white' : 'bg-white/5 hover:bg-white/10'
                   ].join(' ')}
                 >
                   {t}
@@ -234,7 +262,7 @@ function Header({ user, initials, balanceText, tab, setTab }) {
   );
 }
 
-/* ============================ USERS (nur zugewiesene) ============================ */
+/* ============================ Users (assigned only) ============================ */
 function UsersRunner({ users }) {
   const flashSuccess = usePage()?.props?.flash?.success;
   const flashError = usePage()?.props?.flash?.error;
@@ -278,7 +306,7 @@ function UsersRunner({ users }) {
                 <Th>ID</Th>
                 <Th>User</Th>
                 <Th className="text-right">Balance</Th>
-                <Th>Aktion</Th>
+                <Th>Action</Th>
               </tr>
             </thead>
             <tbody>
@@ -287,7 +315,7 @@ function UsersRunner({ users }) {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="p-4 text-center text-white/60">Noch keine Nutzer zugewiesen.</td>
+                  <td colSpan={4} className="p-4 text-center text-white/60">No users assigned yet.</td>
                 </tr>
               )}
             </tbody>
@@ -344,7 +372,7 @@ function UserRowRunner({ user }) {
         <div className="flex flex-wrap items-center gap-2">
           <input
             type="number" step="0.01" min="0.01"
-            placeholder="Betrag"
+            placeholder="Amount"
             value={form.data.amount}
             onChange={(e)=>form.setData('amount', e.target.value)}
             className="w-32 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
@@ -352,9 +380,9 @@ function UserRowRunner({ user }) {
           <button
             onClick={apply}
             disabled={form.processing}
-            className="px-3 py-1.5 rounded-lg bg-green-400 text-black text-sm font-semibold hover:brightness-110 disabled:opacity-60"
+            className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60"
           >
-            Speichern
+            Save
           </button>
         </div>
         {form.errors.amount && <div className="text-rose-300 text-xs mt-1">{form.errors.amount}</div>}
@@ -363,19 +391,19 @@ function UserRowRunner({ user }) {
   );
 }
 
-/* ============================ LOGS (nur zugewiesene User) ============================ */
+/* ============================ Logs (assigned users only) ============================ */
 function LogsRunner({ logs, users, assignedIds = [] }) {
   const [q, setQ] = useState('');
 
   const allLogs = Array.isArray(logs?.data) ? logs.data : (Array.isArray(logs) ? logs : []);
 
-  // Fallback: falls assignedIds leer wäre, nutze (pag.) users
+  // Fallback: if assignedIds is empty, derive from paginated users
   const assignedFromUsers = Array.isArray(users?.data) ? users.data : (users || []);
   const assignedIdSet = useMemo(() => new Set(
     (assignedIds && assignedIds.length ? assignedIds : assignedFromUsers.map(u => u.id))
   ), [assignedIds, assignedFromUsers]);
 
-  // Nur Logs, bei denen from/to zugewiesen sind
+  // Only keep logs where from/to belongs to assigned users
   const scoped = useMemo(() => {
     return allLogs.filter((row) => {
       const fu = row?.from_user_id ?? row?.fromUserId ?? row?.from_user?.id ?? row?.fromUser?.id;
@@ -384,7 +412,7 @@ function LogsRunner({ logs, users, assignedIds = [] }) {
     });
   }, [allLogs, assignedIdSet]);
 
-  // Textfilter für Benutzername/ID
+  // Text filter for username/ID
   const filtered = useMemo(() => {
     if (!q.trim()) return scoped;
     const s = q.toLowerCase();
@@ -409,7 +437,7 @@ function LogsRunner({ logs, users, assignedIds = [] }) {
         <div className="flex items-center gap-2">
           <input
             type="search"
-            placeholder="Filter: Benutzer…"
+            placeholder="Filter: user…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
             className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
@@ -418,7 +446,7 @@ function LogsRunner({ logs, users, assignedIds = [] }) {
             onClick={() => router.reload({ only: ['logs'], preserveState: true, preserveScroll: true })}
             className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10"
           >
-            Aktualisieren
+            Refresh
           </button>
         </div>
       </div>
@@ -427,10 +455,10 @@ function LogsRunner({ logs, users, assignedIds = [] }) {
         <table className="min-w-full text-sm">
           <thead className="bg-white/5 text-white/80">
             <tr>
-              <Th className="w-48">Zeit</Th>
-              <Th>Von</Th>
-              <Th>An</Th>
-              <Th className="text-right w-32">Betrag</Th>
+              <Th className="w-48">Time</Th>
+              <Th>From</Th>
+              <Th>To</Th>
+              <Th className="text-right w-32">Amount</Th>
             </tr>
           </thead>
           <tbody>
@@ -457,7 +485,7 @@ function LogsRunner({ logs, users, assignedIds = [] }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-4 text-center text-white/60">Keine Einträge gefunden.</td>
+                <td colSpan={4} className="p-4 text-center text-white/60">No records found.</td>
               </tr>
             )}
           </tbody>
@@ -481,7 +509,7 @@ function LogsRunner({ logs, users, assignedIds = [] }) {
   );
 }
 
-/* ------- Shared UI bits (aus Welcome.jsx übernommen) ------- */
+/* ------- Shared UI bits (borrowed from Welcome.jsx) ------- */
 function Alert({ tone='info', children }) {
   const map = {
     success: 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200',
@@ -490,12 +518,12 @@ function Alert({ tone='info', children }) {
   };
   return <div className={`rounded-xl border px-3 py-2 ${map[tone]}`}>{children}</div>;
 }
-function Th({ children, className='' }) { return <th className={`text-left p-2 font-semibold ${className}`}>{children}</th>; }
-function Td({ children, className='' }) { return <td className={`p-2 align-middle ${className}`}>{children}</td>; }
+function Th({ children, className='' }) { return <th className={`text-left p-2 font-semibold text-white ${className}`}>{children}</th>; }
+function Td({ children, className='' }) { return <td className={`p-2 align-middle text-white/80 ${className}`}>{children}</td>; }
 function Avatar({ imgUrl, initials }) {
   return imgUrl
     ? <img src={imgUrl} alt="" aria-label="Profile avatar" className="h-9 w-9 rounded-full object-cover ring-2 ring-white/10" loading="lazy" />
-    : <div aria-label="Profile avatar" className="h-9 w-9 rounded-full grid place-items-center bg-gradient-to-br from-cyan-400/80 to-emerald-400/80 text-black font-bold ring-2 ring-white/10">{initials}</div>;
+    : <div aria-label="Profile avatar" className="h-9 w-9 rounded-full grid place-items-center bg-gradient-to-br from-cyan-400/80 to-emerald-400/80 text-white font-bold ring-2 ring-white/10">{initials}</div>;
 }
 function MenuCard({ children, align='left' }) {
   return (

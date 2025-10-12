@@ -3,26 +3,26 @@ import React, { useState } from 'react';
 import { Head, Link, useForm, usePage } from '@inertiajs/react';
 import GuestLayout from '@/Layouts/GuestLayout';
 
-// --- Ziggy helpers: sicher gegen fehlende Route-Namen ---
+// --- Ziggy helpers: safe against missing route names ---
 const ziggyHas = (name) =>
   typeof window !== 'undefined' &&
   window?.Ziggy?.routes &&
   Object.prototype.hasOwnProperty.call(window.Ziggy.routes, name);
 
 const routeUrl = (name, fallback) => {
-  // wenn Ziggy den Namen hat und das globale route() existiert -> URL bauen
+  // if Ziggy knows the name and the global route() exists -> build URL
   if (ziggyHas(name) && typeof route === 'function') return route(name);
-  return fallback; // sonst sichere Fallback-URL benutzen
+  return fallback; // otherwise use fallback URL
 };
 
 export default function Login() {
   const { props } = usePage();
   const status = props?.status || null;
 
-  // Falls du Reset/Registration serverseitig steuern willst:
-  // In deinem Controller/Route kannst du z.B. `Route::has('password.request')` setzen und als Prop schicken.
-  const canResetPassword = ziggyHas('password.request'); // true nur wenn Route existiert
-  const canRegister = ziggyHas('register');              // true nur wenn Route existiert
+  // If you want to control reset/registration server-side:
+  // In your controller/route you can set e.g. `Route::has('password.request')` and send it as a prop.
+  const canResetPassword = ziggyHas('password.request'); // true only if the route exists
+  const canRegister = ziggyHas('register');              // true only if the route exists
 
   const { data, setData, post, processing, errors, reset } = useForm({
     username: '',
@@ -34,7 +34,7 @@ export default function Login() {
 
   const submit = (e) => {
     e.preventDefault();
-    // Sichere URL ermitteln (benannter Route oder Fallback)
+    // Resolve a safe URL (named route or fallback)
     const loginAction = routeUrl('login', '/login');
     post(loginAction, {
       onFinish: () => reset('password'),
@@ -48,10 +48,18 @@ export default function Login() {
         <div className="w-full max-w-md">
           {/* Header / wordmark */}
           <div className="text-center mb-6">
-            <div className="inline-flex items-center gap-2">
-              <span className="text-xl font-semibold tracking-wide">000000</span>
+            <div className="flex justify-center pl-3 sm:pl-6 md:pl-10">
+              <img
+                src="/img/play4cash-logo-horizontal.svg"
+                alt="play4cash"
+                className="h-10 sm:h-12 w-auto drop-shadow-[0_8px_24px_rgba(34,211,238,0.35)] select-none mx-auto"
+                loading="eager"
+                decoding="async"
+                draggable="false"
+                style={{ imageRendering: '-webkit-optimize-contrast' }}
+              />
             </div>
-            <p className="text-sm text-white/70 mt-1">Welcome back — sign in to continue</p>
+            <p className="text-sm text-white/70 mt-1">Welcome back</p>
           </div>
 
           {/* Card */}
@@ -66,7 +74,7 @@ export default function Login() {
               {/* Username */}
               <div>
                 <label htmlFor="username" className="block text-sm font-medium mb-1">
-                  Benutzername
+                  Username
                 </label>
                 <input
                   id="username"
@@ -86,14 +94,14 @@ export default function Login() {
               <div>
                 <div className="flex items-center justify-between">
                   <label htmlFor="password" className="block text-sm font-medium mb-1">
-                    Passwort
+                    Password
                   </label>
                   {canResetPassword && (
                     <Link
                       href={routeUrl('password.request', '/forgot-password')}
                       className="text-xs text-cyan-300 hover:text-cyan-200"
                     >
-                      Passwort vergessen?
+                      Forgot password?
                     </Link>
                   )}
                 </div>
@@ -111,7 +119,7 @@ export default function Login() {
                     type="button"
                     onClick={() => setShowPw((v) => !v)}
                     className="absolute right-2 top-1/2 -translate-y-1/2 text-white/70 hover:text-white"
-                    aria-label={showPw ? 'Passwort verbergen' : 'Passwort anzeigen'}
+                    aria-label={showPw ? 'Hide password' : 'Show password'}
                   >
                     {showPw ? (
                       // Eye-off
@@ -141,7 +149,7 @@ export default function Login() {
                   onChange={(e) => setData('remember', e.target.checked)}
                   className="h-4 w-4 rounded border-white/20 bg-white/5 text-cyan-400 focus:ring-cyan-400"
                 />
-                <span className="text-sm text-white/80">Eingeloggt bleiben</span>
+                <span className="text-sm text-white/80">Stay signed in</span>
               </label>
 
               {/* Submit */}
@@ -150,19 +158,19 @@ export default function Login() {
                 disabled={processing}
                 className="w-full rounded-lg bg-cyan-400 text-black font-semibold py-2.5 hover:brightness-110 disabled:opacity-60"
               >
-                {processing ? 'Einloggen…' : 'Einloggen'}
+                {processing ? 'Logging in…' : 'Log in'}
               </button>
             </form>
 
-            {/* Register (nur wenn Route existiert) */}
+            {/* Register (only if the route exists) */}
             {canRegister && (
               <div className="mt-5 text-center text-sm text-white/70">
-                Kein Konto?{' '}
+                No account yet?{' '}
                 <Link
                   href={routeUrl('register', '/register')}
                   className="text-cyan-300 hover:text-cyan-200"
                 >
-                  Registrieren
+                  Register
                 </Link>
               </div>
             )}

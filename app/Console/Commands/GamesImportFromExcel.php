@@ -9,13 +9,13 @@ use PhpOffice\PhpSpreadsheet\IOFactory;
 class GamesImportFromExcel extends Command
 {
     protected $signature = 'games:import {--file=storage/app/imports/gameList-2025-10-11.xls}';
-    protected $description = 'Importiert/aktualisiert die Spieleliste aus einer XLS-Datei';
+    protected $description = 'Import or update the game list from an XLS file';
 
     public function handle(): int
     {
         $file = base_path($this->option('file'));
         if (!is_file($file)) {
-            $this->error("Datei nicht gefunden: {$file}");
+            $this->error("File not found: {$file}");
             return self::FAILURE;
         }
 
@@ -24,7 +24,7 @@ class GamesImportFromExcel extends Command
         $rows = $sheet->toArray(null, true, true, true);
 
         if (empty($rows)) {
-            $this->warn('Keine Daten gefunden.');
+            $this->warn('No data found.');
             return self::SUCCESS;
         }
 
@@ -65,7 +65,7 @@ class GamesImportFromExcel extends Command
             else       { Game::create($payload);           $inserted++; }
         }
 
-        $this->info("Import fertig: neu={$inserted}, aktualisiert={$updated}, übersprungen={$skipped}");
+        $this->info("Import complete: new={$inserted}, updated={$updated}, skipped={$skipped}");
         return self::SUCCESS;
     }
 }

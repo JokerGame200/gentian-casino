@@ -3,7 +3,7 @@ import { router, usePage } from "@inertiajs/react";
 import { useInertiaAutoRefresh } from "@/hooks/useInertiaAutoRefresh";
 
 export default function LogsPage({ logs }) {
-  // 🔄 alle 4s nur die Logs-Prop nachladen (kein Full-Reload)
+  // Refresh the logs prop every 4s without a full reload
   useInertiaAutoRefresh(["logs"], 4000);
 
   const { props } = usePage();
@@ -25,41 +25,41 @@ export default function LogsPage({ logs }) {
   }, [items, q]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 text-white">
       <div className="flex items-center justify-between gap-4">
         <h1 className="text-xl font-semibold">
-          Dealer Logs {isAdmin ? "(Admin)" : isRunner ? "(Runner)" : ""}
+          Dealer Logs {isAdmin ? "(Admin)" : isRunner ? "(Dealer)" : ""}
         </h1>
         <div className="flex items-center gap-2">
           <input
             type="search"
-            placeholder="Filter: Benutzer..."
+            placeholder="Filter: user..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="border rounded px-3 py-1 text-sm"
+            className="rounded bg-white/5 border border-white/15 px-3 py-1 text-sm text-white placeholder-white/50 outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400/60"
           />
           <button
             onClick={() =>
               router.reload({ only: ["logs"], preserveState: true, preserveScroll: true })
             }
-            className="text-sm px-3 py-1 border rounded hover:bg-gray-50"
+            className="text-sm px-3 py-1 border border-white/15 rounded bg-white/5 hover:bg-white/10 transition-colors"
           >
-            Aktualisieren
+            Refresh
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto border rounded">
+      <div className="overflow-x-auto border border-white/10 rounded-xl">
         <table className="min-w-full text-sm">
-          <thead className="bg-gray-100">
+          <thead className="bg-white/10 text-white/80">
             <tr>
-              <th className="text-left p-2 w-48">Zeit</th>
-              <th className="text-left p-2">Von</th>
-              <th className="text-left p-2">An</th>
-              <th className="text-right p-2 w-32">Betrag</th>
+              <th className="text-left p-2 font-semibold w-48">Time</th>
+              <th className="text-left p-2 font-semibold">From</th>
+              <th className="text-left p-2 font-semibold">To</th>
+              <th className="text-right p-2 font-semibold w-32">Amount</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody className="bg-white/5">
             {filtered.map((row) => {
               const id = row.id ?? `${row.created_at}-${row.to_user_id}-${row.from_user_id}`;
               const fromUser = row?.from_user ?? row?.fromUser ?? {};
@@ -70,12 +70,12 @@ export default function LogsPage({ logs }) {
               const when = dt ? dt.toLocaleString() : "-";
 
               return (
-                <tr key={id} className="border-t">
-                  <td className="p-2 whitespace-nowrap">{when}</td>
-                  <td className="p-2">{fromUser?.username ?? `#${row?.from_user_id ?? "-"}`}</td>
-                  <td className="p-2">{toUser?.username ?? `#${row?.to_user_id ?? "-"}`}</td>
+                <tr key={id} className="border-t border-white/10">
+                  <td className="p-2 whitespace-nowrap text-white/80">{when}</td>
+                  <td className="p-2 text-white/80">{fromUser?.username ?? `#${row?.from_user_id ?? "-"}`}</td>
+                  <td className="p-2 text-white/80">{toUser?.username ?? `#${row?.to_user_id ?? "-"}`}</td>
                   <td className="p-2 text-right font-mono">
-                    <span className={isPlus ? "text-green-600" : "text-red-600"}>
+                    <span className={isPlus ? "text-emerald-300" : "text-rose-300"}>
                       {isPlus ? "+" : ""}
                       {amount.toFixed(2)}
                     </span>
@@ -85,8 +85,8 @@ export default function LogsPage({ logs }) {
             })}
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-4 text-center text-gray-500">
-                  Keine Einträge gefunden.
+                <td colSpan={4} className="p-4 text-center text-white/60 border-t border-white/10">
+                  No records found.
                 </td>
               </tr>
             )}
@@ -100,8 +100,8 @@ export default function LogsPage({ logs }) {
           {logs.links.map((l, i) => (
             <button
               key={i}
-              className={`px-3 py-1 border rounded text-sm ${
-                l.active ? "bg-gray-200" : "hover:bg-gray-50"
+              className={`px-3 py-1 border border-white/15 rounded text-sm transition-colors ${
+                l.active ? "bg-cyan-500 text-white" : "bg-white/5 hover:bg-white/10"
               } ${!l.url ? "opacity-50 cursor-not-allowed" : ""}`}
               dangerouslySetInnerHTML={{ __html: l.label }}
               disabled={!l.url}

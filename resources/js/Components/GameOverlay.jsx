@@ -7,7 +7,7 @@ export default function GameOverlay() {
   const [frame, setFrame] = useState(null);
   const scrollRef = useRef(0);
 
-  // --- Spiel öffnen (ein Spiel gleichzeitig) ---
+  // --- Open a game (only one at a time) ---
   const openGame = useCallback(async (gameId, options = {}) => {
     if (frame) return; // block: nur 1 Spiel gleichzeitig
 
@@ -16,30 +16,30 @@ export default function GameOverlay() {
       const data = await res.json();
 
       if (data?.status !== 'success') {
-        throw new Error(data?.error || 'Spiel konnte nicht geöffnet werden.');
+        throw new Error(data?.error || 'The game could not be opened.');
       }
 
-      // Wenn Einbettung nicht erlaubt -> direkt weiterleiten
+      // If embedding is not allowed -> redirect directly
       if (String(data.withoutFrame) === '1') {
         window.location.assign(data.url);
         return;
       }
 
-      // Seite "unter" dem Spiel einfrieren & Scrollposition merken
+      // Freeze the page beneath the game and remember scroll position
       scrollRef.current = window.scrollY || 0;
       document.body.classList.add('game-open');
       document.documentElement.classList.add('game-open');
 
-      // Back-Button so verdrahten, dass er das Spiel schließt
+      // Wire the browser Back button to close the game
       history.pushState({ game: true }, '');
 
       setFrame({ url: data.url, withoutFrame: '0' });
     } catch (e) {
-      alert(e?.message || 'Spiel konnte nicht geöffnet werden.');
+      alert(e?.message || 'The game could not be opened.');
     }
   }, [frame]);
 
-  // --- global verfügbar machen, damit z.B. Welcome.jsx das Overlay nutzen kann ---
+  // --- Expose globally so Welcome.jsx can use the overlay ---
   useEffect(() => {
     window.openGameViaOverlay = (gameId, options = {}) => openGame(gameId, options);
     return () => {
@@ -47,22 +47,22 @@ export default function GameOverlay() {
     };
   }, [openGame]);
 
-  // --- Spiel schließen ---
+  // --- Close the game ---
   const closeGame = useCallback(() => {
     setFrame(null);
     document.body.classList.remove('game-open');
     document.documentElement.classList.remove('game-open');
 
-    // Scrollposition zurück
+    // Restore scroll position
     try { window.scrollTo({ top: scrollRef.current || 0, behavior: 'auto' }); } catch {}
 
-    // Falls wir einen History-Eintrag für das Spiel gesetzt haben -> wieder zurück
+    // If a history entry for the game was added, go back
     if (history.state?.game) {
       try { history.back(); } catch {}
     }
   }, []);
 
-  // --- Messages aus dem iFrame abfangen (postMessage) ---
+  // --- Handle messages from the iFrame (postMessage) ---
   useEffect(() => {
     const onMsg = (event) => {
       const d = event.data;
@@ -80,7 +80,7 @@ export default function GameOverlay() {
     return () => window.removeEventListener('message', onMsg);
   }, [closeGame]);
 
-  // --- ESC schließt Spiel ---
+  // --- ESC closes the game ---
   useEffect(() => {
     const onKey = (e) => {
       if (e.key === 'Escape' && frame) closeGame();
@@ -89,7 +89,7 @@ export default function GameOverlay() {
     return () => window.removeEventListener('keydown', onKey);
   }, [frame, closeGame]);
 
-  // --- Browser-Zurück: schließt Spiel statt Seite zu verlassen ---
+  // --- Browser back: close the game instead of leaving the page ---
   useEffect(() => {
     const onPop = () => {
       if (frame) closeGame();
@@ -103,7 +103,7 @@ export default function GameOverlay() {
   return (
     <div
       className="fixed inset-0 z-[9999] bg-black/90"
-      // Klick auf den dunklen Hintergrund schließt das Spiel
+      // Clicking the dark backdrop closes the game
       onClick={(e) => { if (e.target === e.currentTarget) closeGame(); }}
       role="dialog"
       aria-modal="true"

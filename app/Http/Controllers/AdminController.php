@@ -173,7 +173,8 @@ class AdminController extends Controller
             $user->save();
         }
 
-        return back()->with('success', "Rolle aktualisiert: {$role}");
+        $roleLabel = $role === 'Runner' ? 'Dealer' : $role;
+        return back()->with('success', "Role updated: {$roleLabel}");
     }
 
     /**
@@ -193,14 +194,14 @@ class AdminController extends Controller
                      || (($runner->role ?? null) === 'Runner');
 
             if (!$isRunner) {
-                return back()->with('error', 'Der gewählte Betreuer ist kein Runner.');
+                return back()->with('error', 'The selected user is not a dealer.');
             }
         }
 
         $user->runner_id = $runnerId;
         $user->save();
 
-        return back()->with('success', 'Runner-Zuweisung aktualisiert.');
+        return back()->with('success', 'Dealer assignment updated.');
     }
 
     /**
@@ -210,12 +211,12 @@ class AdminController extends Controller
     {
         // Optional: Schutz, z. B. Admins nicht löschen, sich selbst nicht löschen, etc.
         if ((method_exists($user, 'hasRole') && $user->hasRole('Admin')) || (($user->role ?? null) === 'Admin')) {
-            return back()->with('error', 'Admin-Konten können hier nicht gelöscht werden.');
+            return back()->with('error', 'Admin accounts cannot be deleted here.');
         }
 
         $user->delete();
 
-        return back()->with('success', 'Benutzer gelöscht.');
+        return back()->with('success', 'User deleted.');
     }
 
     /**
@@ -230,7 +231,7 @@ class AdminController extends Controller
 
         if (!$isRunner) {
             return back(303)->withErrors([
-                'runner_daily_limit' => 'Limits können nur für Runner gesetzt werden.',
+                'runner_daily_limit' => 'Limits can only be set for dealers.',
             ])->withInput();
         }
 
@@ -242,7 +243,7 @@ class AdminController extends Controller
         // (Optional) Logik: pro-User <= daily
         if ($data['runner_per_user_limit'] > $data['runner_daily_limit']) {
             return back(303)->withErrors([
-                'runner_per_user_limit' => 'Das Pro-User/Tag-Limit darf das Tageslimit nicht überschreiten.',
+                'runner_per_user_limit' => 'The per-user daily limit cannot exceed the daily limit.',
             ])->withInput();
         }
 
@@ -251,7 +252,7 @@ class AdminController extends Controller
         $runner->runner_per_user_limit = $data['runner_per_user_limit'];
         $runner->save();
 
-        return back(303)->with('success', 'Runner-Limits aktualisiert.');
+        return back(303)->with('success', 'Dealer limits updated.');
     }
 
 }
