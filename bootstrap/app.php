@@ -3,56 +3,70 @@
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
-use Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful;
-
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
-        web: __DIR__.'/../routes/web.php',
-        api: __DIR__.'/../routes/api.php',          // falls nicht vorhanden: Zeile auskommentieren
-        commands: __DIR__.'/../routes/console.php', // lege eine leere Datei an, wenn nötig
+        web: __DIR__ . '/../routes/web.php',
+        api: __DIR__ . '/../routes/api.php',
+        commands: __DIR__ . '/../routes/console.php',
+        health: '/up',
     )
     ->withMiddleware(function (Middleware $middleware) {
-        // Inertia (Breeze) – nur ergänzen, falls nicht schon im Web-Stack
-        $middleware->web(append: [
+        /**
+         * Globale Middlewares (für jede Anfrage).
+         * (Diese beiden sind idempotent – doppelt schadet nicht,
+         *  aber wir hängen sie hier einmal zentral ein.)
+         */
+        $middleware->append(\App\Http\Middleware\TrustProxies::class);
+        $middleware->append(\App\Http\Middleware\TrimStrings::class);
+        $middleware->append(\Illuminate\Foundation\Http\Middleware\ConvertEmptyStringsToNull::class);
+
+        /**
+         * Middleware-Aliasse (werden in Routes verwendet: auth, verified, throttle:api, usw.)
+         */
+        $middleware->alias([
+            'auth'               => \App\Http\Middleware\Authenticate::class,
+            'guest'              => \App\Http\Middleware\RedirectIfAuthenticated::class,
+            'verified'           => \Illuminate\Auth\Middleware\EnsureEmailIsVerified::class,
+            'password.confirm'   => \Illuminate\Auth\Middleware\RequirePassword::class,
+            'signed'             => \App\Http\Middleware\ValidateSignature::class,
+            'throttle'           => \Illuminate\Routing\Middleware\ThrottleRequests::class,
+            'bindings'           => \Illuminate\Routing\Middleware\SubstituteBindings::class,
+        ]);
+
+        /**
+         * WEB-Gruppe (Blade/Inertia, Session, CSRF, Auth).
+         * Wir definieren sie explizit, damit Session & CSRF sicher aktiv sind.
+         */
+        $middleware->group('web', [
+            \Illuminate\Cookie\Middleware\EncryptCookies::class,
+            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+            \Illuminate\Session\Middleware\StartSession::class,
+            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+
+            // Dein CSRF – enthält die /api/*-Ausnahme (siehe unten in VerifyCsrfToken)
+            \App\Http\Middleware\VerifyCsrfToken::class,
+
+            // Route Model Binding usw.
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+
+            // Falls du Inertia verwendest (laravel/breeze + inertia)
             \App\Http\Middleware\HandleInertiaRequests::class,
         ]);
 
-        $middleware->api(prepend: [
-            EnsureFrontendRequestsAreStateful::class,
+        /**
+         * API-Gruppe (stateless). Throttle nutzt deinen in AppServiceProvider registrierten "api"-Limiter.
+         */
+        $middleware->group('api', [
+            'throttle:api',
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
         ]);
-        
-        $middleware->alias([
-            'auth' => \App\Http\Middleware\Authenticate::class,
-        ]);
 
-        // === Spatie-Permission Aliasse (robust für beide Namensräume) ===
-        $roleClass = class_exists(\Spatie\Permission\Middlewares\RoleMiddleware::class)
-            ? \Spatie\Permission\Middlewares\RoleMiddleware::class
-            : (class_exists(\Spatie\Permission\Middleware\RoleMiddleware::class)
-                ? \Spatie\Permission\Middleware\RoleMiddleware::class
-                : null);
-
-        $permClass = class_exists(\Spatie\Permission\Middlewares\PermissionMiddleware::class)
-            ? \Spatie\Permission\Middlewares\PermissionMiddleware::class
-            : (class_exists(\Spatie\Permission\Middleware\PermissionMiddleware::class)
-                ? \Spatie\Permission\Middleware\PermissionMiddleware::class
-                : null);
-
-        $ropClass = class_exists(\Spatie\Permission\Middlewares\RoleOrPermissionMiddleware::class)
-            ? \Spatie\Permission\Middlewares\RoleOrPermissionMiddleware::class
-            : (class_exists(\Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class)
-                ? \Spatie\Permission\Middleware\RoleOrPermissionMiddleware::class
-                : null);
-
-        $aliases = [
-            'invite_token' => \App\Http\Middleware\EnsureValidInviteToken::class,
-        ];
-        if ($roleClass) $aliases['role'] = $roleClass;
-        if ($permClass) $aliases['permission'] = $permClass;
-        if ($ropClass)  $aliases['role_or_permission'] = $ropClass;
-
-        $middleware->alias($aliases);
+        /**
+         * Optional (falls du Sanctum-SPA-Cookies für /api nutzt):
+         * $middleware->prependToGroup('api', \Laravel\Sanctum\Http\Middleware\EnsureFrontendRequestsAreStateful::class);
+         * – Bei dir scheint API aber rein server-to-server zu sein; daher meist NICHT nötig.
+         */
     })
     ->withExceptions(function (Exceptions $exceptions) {
         //

@@ -1,355 +1,245 @@
 // resources/js/Pages/Welcome.jsx
-import React, { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  memo, useCallback, useEffect, useLayoutEffect, useMemo,
+  useRef, useState, useDeferredValue
+} from 'react';
 import { Head, usePage, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { postJson } from '@/utils/api';
 import * as ReactWindow from 'react-window';
-const List = ReactWindow.List || ReactWindow.FixedSizeList;
+const { FixedSizeList: List } = ReactWindow;
+
 /* ------------------------------ CSS ------------------------------ */
-const HIDE_SCROLLBAR_CSS = `
+const PERF_CSS = `
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+@supports (content-visibility: auto) {
+  .island { content-visibility: auto; contain-intrinsic-size: 800px 450px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .scroll-smooth { scroll-behavior: auto !important; }
+}
+.body-game-open { overflow: hidden; }
 `;
 
-/* ------------------------------ Utils Hooks ------------------------------ */
-function useDebouncedValue(value, delay = 200) {
-  const [v, setV] = useState(value);
-  useEffect(() => {
-    const id = setTimeout(() => setV(value), delay);
-    return () => clearTimeout(id);
-  }, [value, delay]);
-  return v;
-}
-
-function useThrottleFn(fn, wait = 100, options = { leading: true, trailing: true }) {
-  const last = useRef(0);
-  const timeout = useRef();
-  const saved = useRef(fn);
+/* ------------------------------ Utils ------------------------------ */
+function useRafThrottle(fn) {
+  const frame = useRef(0), lastArgs = useRef([]), saved = useRef(fn);
   useEffect(() => { saved.current = fn; }, [fn]);
-
-  return useCallback((...args) => {
-    const now = Date.now();
-    const remaining = wait - (now - last.current);
-    if (remaining <= 0) {
-      if (timeout.current) { clearTimeout(timeout.current); timeout.current = null; }
-      last.current = now;
-      if (options.leading !== false) saved.current(...args);
-    } else if (!timeout.current && options.trailing !== false) {
-      timeout.current = setTimeout(() => {
-        last.current = options.leading === false ? 0 : Date.now();
-        timeout.current = null;
-        saved.current(...args);
-      }, remaining);
-    }
-  }, [wait, options.leading, options.trailing]);
+  const cb = useCallback((...args) => {
+    lastArgs.current = args;
+    if (frame.current) return;
+    frame.current = requestAnimationFrame(() => { frame.current = 0; saved.current(...lastArgs.current); });
+  }, []);
+  useEffect(() => () => cancelAnimationFrame(frame.current), []);
+  return cb;
 }
-
 function useMeasure() {
   const ref = useRef(null);
   const [rect, setRect] = useState({ width: 0, height: 0 });
   useEffect(() => {
     if (!ref.current) return;
-    const ro = new ResizeObserver((entries) => {
-      const r = entries[0]?.contentRect;
-      if (r) setRect({ width: r.width, height: r.height });
+    const ro = new ResizeObserver(([e]) => {
+      if (e?.contentRect) setRect({ width: e.contentRect.width, height: e.contentRect.height });
     });
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
   return [ref, rect];
 }
-
 function useWindowSize() {
-  const [s, setS] = useState({ w: window.innerWidth, h: window.innerHeight });
-  const onResize = useThrottleFn(() => setS({ w: window.innerWidth, h: window.innerHeight }), 150);
-  useEffect(() => {
-    window.addEventListener('resize', onResize, { passive: true });
-    return () => window.removeEventListener('resize', onResize);
-  }, [onResize]);
+  const [s, setS] = useState({ w: typeof window !== 'undefined' ? window.innerWidth : 0, h: typeof window !== 'undefined' ? window.innerHeight : 0 });
+  const onResize = useRafThrottle(() => setS({ w: window.innerWidth, h: window.innerHeight }));
+  useEffect(() => { window.addEventListener('resize', onResize, { passive: true }); return () => window.removeEventListener('resize', onResize); }, [onResize]);
   return s;
 }
 
-/* ------------------------------ LazyImage (IO + native) ------------------------------ */
-const LazyImage = memo(function LazyImage({ src, alt, className, onLoad }) {
+/* ------------------------------ Image utils ------------------------------ */
+const TRANSPARENT_PX =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y1Q7u8AAAAASUVORK5CYII=';
+
+const LazyImage = memo(function LazyImage({ src, alt, className }) {
   const imgRef = useRef(null);
   const [inView, setInView] = useState(false);
-
   useEffect(() => {
-    const el = imgRef.current;
-    if (!el) return;
-    // Wenn Browser schon "lazy" gut macht, reicht es, aber IO verhindert Preload weiter außerhalb
+    const el = imgRef.current; if (!el) return;
     const io = new IntersectionObserver((entries) => {
-      for (const e of entries) {
-        if (e.isIntersecting) {
-          setInView(true);
-          io.disconnect();
-          break;
-        }
-      }
+      for (const e of entries) if (e.isIntersecting) { setInView(true); io.disconnect(); break; }
     }, { rootMargin: '300px' });
     io.observe(el);
     return () => io.disconnect();
   }, []);
-
-  const realSrc = inView ? src : undefined;
-
   return (
     <img
       ref={imgRef}
-      src={realSrc}
+      src={inView ? src : undefined}
       alt={alt}
       className={className}
       loading="lazy"
       decoding="async"
-      onLoad={onLoad}
-      // Kein heavy CSS (filter/blur/shadow). Nur object-fit Cover.
-      style={{ willChange: 'transform' }}
+      fetchpriority="low"
     />
   );
 });
 
+/* ---------- Normalisierung & Dedupe (fehlte in der letzten Version) ---------- */
+const normalizeName = (s) => String(s ?? '')
+  .toLowerCase()
+  .replace(/[™®©]/g, '')
+  .replace(/\b(deluxe|classic|cash\s*link|dx|hd|xxl|gold|megaways|mega\s*ways)\b/g, '')
+  .replace(/[-_.:/\\]+/g, ' ')
+  .replace(/\s+/g, ' ')
+  .trim();
+
+const stableProvider = (s) => String(s ?? '')
+  .toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+
+const isMeaningfulUrl = (u) => {
+  if (!u) return false;
+  const s = String(u).trim();
+  if (!s || s === 'null' || s === 'undefined') return false;
+  if (s.startsWith('data:') && s.length < 64) return false;
+  return true;
+};
+const getName     = (g) => g?.name ?? g?.title ?? g?.display_name ?? g?.gameName ?? g?.label ?? g?.text ?? '';
+const getProvider = (g) => g?.provider ?? g?.vendor ?? g?.studio ?? g?.brand ?? g?.providerName ?? '';
+const pickImage = (g) => {
+  const cands = [g?.img, g?.game_img_2, g?.game_img, g?.image2, g?.image, g?.img2, g?.thumb, g?.thumbnail, g?.logo, g?.icon, g?.images?.large, g?.images?.thumb, g?.assets?.thumb, g?.assets?.image];
+  for (const x of cands) if (isMeaningfulUrl(x)) return String(x);
+  return TRANSPARENT_PX;
+};
+const buildKeyCandidates = (g) => {
+  const idCands = [g?.uid, g?.uuid, g?.game_id, g?.sys_id, g?.id, g?.slug, g?.code, g?.key, g?.external_id].filter(v => v != null);
+  const nameN = normalizeName(getName(g));
+  const provN = stableProvider(getProvider(g));
+  const keys = [
+    ...idCands.map(v => `id:${String(v)}`),
+    (provN && nameN) ? `provname:${provN}#${nameN}` : null,
+    nameN ? `name:${nameN}` : null,
+  ].filter(Boolean);
+  return { keys, nameN, provN };
+};
+const hasBetterThumb = (a, b) => {
+  const ia = String(a?.img || ''), ib = String(b?.img || '');
+  const ph = (x) => !isMeaningfulUrl(x) || x.startsWith('data:');
+  if (ph(ia) && !ph(ib)) return false;
+  if (!ph(ia) && ph(ib)) return true;
+  return ia.length >= ib.length;
+};
+function normalizeAndDedupe(list) {
+  const map = new Map(); const reserved = new Set();
+  for (const raw of list) {
+    const name = String(getName(raw) || '').trim();
+    const provider = String(getProvider(raw) || '').trim();
+    const img = pickImage(raw);
+    const { keys, nameN, provN } = buildKeyCandidates(raw);
+    const norm = { ...raw, name, provider, img, _nameN: nameN, _provN: provN };
+
+    let bucketKey = null;
+    for (const k of keys) if (map.has(k)) { bucketKey = k; break; }
+    if (!bucketKey) for (const k of keys) if (!reserved.has(k)) { bucketKey = k; break; }
+    if (!bucketKey) bucketKey = provN && nameN ? `provname:${provN}#${nameN}` : (nameN || `rand:${Math.random().toString(36).slice(2)}`);
+
+    const prev = map.get(bucketKey);
+    if (!prev) { map.set(bucketKey, norm); keys.forEach(k => reserved.add(k)); }
+    else { if (!hasBetterThumb(prev, norm)) map.set(bucketKey, norm); keys.forEach(k => reserved.add(k)); }
+  }
+  return [...map.values()];
+}
+
 /* ------------------------------ Seite ------------------------------ */
 export default function Welcome() {
   const { props } = usePage();
-  const user = (props?.auth?.user) || {};
+  const user = props?.auth?.user || {};
 
-  // --- Live-Balance (unverändert) ---------------------------------
-  const initialBalance = Number(user.balance ?? 0);
-  const initialCurrency = user.currency ?? 'EUR';
-  const [liveBalance, setLiveBalance] = useState(initialBalance);
-  const [liveCurrency, setLiveCurrency] = useState(initialCurrency);
-
-  useEffect(() => { setLiveBalance(initialBalance); setLiveCurrency(initialCurrency); }, [initialBalance, initialCurrency]);
-
-  const balanceEndpointRef = useRef(null);
-  const fetchAbortRef = useRef(null);
-
-  function parseBalancePayload(data) {
-    const u = data?.user ?? data?.data ?? data ?? {};
-    let b = u?.balance ?? data?.balance ?? data?.data?.balance;
-    const c = u?.currency ?? data?.currency ?? data?.data?.currency;
-    if (typeof b === 'string') {
-      const f = parseFloat(b.replace(',', '.'));
-      b = isNaN(f) ? undefined : f;
-    }
-    if (typeof b === 'number' && isFinite(b)) return { balance: b, currency: c };
-    return null;
-  }
-
-  async function tryFetchBalance(url) {
-    const ts = Date.now();
-    const fullUrl = `${url}${url.includes('?') ? '&' : '?'}ts=${ts}`;
-    fetchAbortRef.current?.abort();
-    const controller = new AbortController();
-    fetchAbortRef.current = controller;
-    const res = await fetch(fullUrl, {
-      method: 'GET',
-      credentials: 'include',
-      cache: 'no-store',
-      headers: { 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'Cache-Control': 'no-store', 'Pragma': 'no-cache' },
-      signal: controller.signal,
-    }).catch(() => null);
-    if (!res || !res.ok) return null;
-    const ct = (res.headers.get('content-type') || '').toLowerCase();
-    if (!ct.includes('application/json')) return null;
-    const json = await res.json().catch(() => null);
-    return parseBalancePayload(json);
-  }
+  // Live-Balance
+  const [liveBalance, setLiveBalance] = useState(Number(user.balance ?? 0));
+  const [liveCurrency, setLiveCurrency] = useState(user.currency ?? 'EUR');
+  useEffect(() => { setLiveBalance(Number(user.balance ?? 0)); setLiveCurrency(user.currency ?? 'EUR'); }, [user.balance, user.currency]);
 
   useEffect(() => {
-    let stopped = false;
-    const candidates = ['/api/me/balance','/api/user/balance','/api/me','/api/user','/me'];
-    const fetchBalance = async () => {
-      if (stopped) return;
-      const known = balanceEndpointRef.current;
-      if (known) {
-        const data = await tryFetchBalance(known);
-        if (data && !stopped) {
-          if (typeof data.balance === 'number') setLiveBalance(data.balance);
-          if (data.currency) setLiveCurrency(data.currency);
+    let stop = false; let t;
+    const tick = async () => {
+      if (document.visibilityState !== 'visible') { t = setTimeout(tick, 12000); return; }
+      try {
+        const res = await fetch('/api/me', { headers: { 'Accept': 'application/json' }, credentials: 'include', cache: 'no-store' });
+        const j = await res.json().catch(() => null);
+        const u = j?.user || j?.data?.user || j;
+        if (u && !stop) {
+          if (Number.isFinite(+u.balance)) setLiveBalance(+u.balance);
+          if (u.currency) setLiveCurrency(u.currency);
         }
-        return;
-      }
-      for (const url of candidates) {
-        const data = await tryFetchBalance(url);
-        if (data && !stopped) {
-          balanceEndpointRef.current = url;
-          if (typeof data.balance === 'number') setLiveBalance(data.balance);
-          if (data.currency) setLiveCurrency(data.currency);
-          break;
-        }
-      }
+      } catch {}
+      if (!stop) t = setTimeout(tick, 12000);
     };
-    fetchBalance();
-    const id = setInterval(fetchBalance, 2000);
-    return () => { stopped = true; clearInterval(id); fetchAbortRef.current?.abort(); };
+    t = setTimeout(tick, 12000);
+    return () => { stop = true; clearTimeout(t); };
   }, []);
 
-  function formatCurrency(v, cur) {
-    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: cur }).format(v); }
-    catch { return `${(isFinite(v) ? v : 0).toFixed(2)} ${cur}`; }
-  }
-  const balanceText = formatCurrency(liveBalance, liveCurrency);
+  const balanceText = (() => {
+    try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: liveCurrency }).format(liveBalance); }
+    catch { return `${(isFinite(liveBalance) ? liveBalance : 0).toFixed(2)} ${liveCurrency}`; }
+  })();
 
-  const initials = (name => {
-    if (!name || typeof name !== 'string') return 'N2';
-    const parts = name.trim().split(/\s+/).slice(0, 2);
-    return parts.map(p => p[0]?.toUpperCase() ?? '').join('') || 'N2';
-  })(user.name);
+  const initials = (() => {
+    const n = String(user.name || '').trim(); if (!n) return 'N2';
+    const p = n.split(/\s+/).slice(0, 2).map(s => s[0]?.toUpperCase() || '');
+    return p.join('') || 'N2';
+  })();
 
-  // ----------------- Spiele laden (wie gehabt) -----------------
-  const [loading, setLoading] = useState(true);
-  const [loadErr, setLoadErr] = useState('');
-  const [gamesRaw, setGamesRaw] = useState([]);
+  // ------------ Games laden ------------
+  const [games, setGames] = useState([]);
+  const [loadingGames, setLoadingGames] = useState(true);
+  const [gamesError, setGamesError] = useState('');
 
   useEffect(() => {
     let alive = true;
-    setLoading(true);
-    postJson('/api/games/list', { img: 'game_img_2' })
-      .then(r => r.json())
-      .then(data => {
-        if (!alive) return;
-        if (data?.status !== 'success') throw new Error(data?.error || 'load_failed');
-        setGamesRaw(Array.isArray(data.games) ? data.games : []);
-        setLoadErr('');
-      })
-      .catch(e => { if (alive) setLoadErr(e?.message || 'Load failed'); })
-      .finally(() => { if (alive) setLoading(false); });
+    (async () => {
+      try {
+        setLoadingGames(true);
+        const res = await fetch('/api/games/list?img=game_img_2', {
+          method: 'GET',
+          headers: { 'Accept': 'application/json' },
+          credentials: 'include',
+          cache: 'no-store',
+        });
+        const json = await res.json().catch(() => null);
+        const list = Array.isArray(json?.games) ? json.games : Array.isArray(json) ? json : [];
+        if (alive) {
+          setGames(normalizeAndDedupe(list));
+          setGamesError(list.length ? '' : 'Keine Spiele gefunden.');
+        }
+      } catch {
+        if (alive) setGamesError('Fehler beim Laden der Spiele.');
+      } finally {
+        if (alive) setLoadingGames(false);
+      }
+    })();
     return () => { alive = false; };
   }, []);
 
-  // ---- Normalisierung & Dedupe (aus deiner Datei) ----
-  const normalizeName = (s) => String(s ?? '')
-    .toLowerCase()
-    .replace(/[™®©]/g, '')
-    .replace(/\b(deluxe|classic|cash\s*link|dx|hd|xxl|gold|megaways|mega\s*ways)\b/g, '')
-    .replace(/[-_.:/\\]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const stableProvider = (s) => String(s ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
-  const isMeaningfulUrl = (u) => {
-    if (!u) return false;
-    const s = String(u).trim();
-    if (!s || s === 'null' || s === 'undefined') return false;
-    if (s.startsWith('data:') && s.length < 64) return false;
-    return true;
-  };
-
-  const pickImage = (g) => {
-    const cands = [
-      g?.game_img_2, g?.game_img, g?.image2, g?.image, g?.img2, g?.img, g?.thumb, g?.thumbnail, g?.logo, g?.icon,
-      g?.images?.large, g?.images?.thumb, g?.assets?.thumb, g?.assets?.image
-    ];
-    for (const x of cands) if (isMeaningfulUrl(x)) return String(x);
-    return TRANSPARENT_PX;
-  };
-
-  const getName = (g) => g?.name ?? g?.title ?? g?.display_name ?? g?.gameName ?? g?.label ?? g?.text ?? '';
-  const getProvider = (g) => g?.provider ?? g?.vendor ?? g?.studio ?? g?.brand ?? g?.providerName ?? '';
-
-  const buildKeyCandidates = (g) => {
-    const idCands = [g?.uid, g?.uuid, g?.game_id, g?.sys_id, g?.id, g?.slug, g?.code, g?.key, g?.external_id].filter(v => v != null);
-    const nameN = normalizeName(getName(g));
-    const provN = stableProvider(getProvider(g));
-    const keys = [
-      ...idCands.map(v => `id:${String(v)}`),
-      (provN && nameN) ? `provname:${provN}#${nameN}` : null,
-      nameN ? `name:${nameN}` : null,
-    ].filter(Boolean);
-    return { keys, nameN, provN };
-  };
-
-  const hasBetterThumb = (a, b) => {
-    const ia = String(a?.img || '');
-    const ib = String(b?.img || '');
-    const ph = (x) => !isMeaningfulUrl(x) || x.startsWith('data:');
-    if (ph(ia) && !ph(ib)) return false;
-    if (!ph(ia) && ph(ib)) return true;
-    return ia.length >= ib.length;
-  };
-
-  const normalizeAndDedupe = (list) => {
-    const map = new Map(); // key -> normalized game
-    const reserved = new Set();
-    for (const raw of list) {
-      const name = String(getName(raw) || '').trim();
-      const provider = String(getProvider(raw) || '').trim();
-      const img = pickImage(raw);
-      const { keys, nameN, provN } = buildKeyCandidates(raw);
-
-      const norm = { ...raw, name, provider, img, _nameN: nameN, _provN: provN };
-
-      let bucketKey = null;
-      for (const k of keys) { if (map.has(k)) { bucketKey = k; break; } }
-      if (!bucketKey) for (const k of keys) { if (!reserved.has(k)) { bucketKey = k; break; } }
-      if (!bucketKey) bucketKey = provN && nameN ? `provname:${provN}#${nameN}` : (nameN || `rand:${Math.random().toString(36).slice(2)}`);
-
-      const prev = map.get(bucketKey);
-      if (!prev) {
-        map.set(bucketKey, norm);
-        keys.forEach(k => reserved.add(k));
-      } else {
-        if (!hasBetterThumb(prev, norm)) map.set(bucketKey, norm);
-        keys.forEach(k => reserved.add(k));
-      }
-    }
-    return [...map.values()];
-  };
-
-  const games = useMemo(() => normalizeAndDedupe(gamesRaw), [gamesRaw]);
-
-  // --- Kategorien & Suche (mit Debounce) --------------------------
+  // ------------ Kategorien & Suche (Tabs aus Doku) ------------
+  const providerTabs = [
+    'All','novomatic','ainsworth','pragmatic','NetEnt','microgaming','scientific_games','aristocrat',
+    'quickspin','igt','scratch','igrosoft','amatic','apex','merkur','table_games','gclub',
+    'habanero','apollo','wazdan','egt','roulette','bingo','keno'
+  ];
   const [selectedCat, setSelectedCat] = useState('All');
   const [queries, setQueries] = useState({});
   const q = queries[selectedCat] ?? '';
-  const dq = useDebouncedValue(q, 200); // ← teure Filterung entkoppelt
-
-  const setQ = useCallback((val) => {
-    setQueries(prev => ({ ...prev, [selectedCat]: val }));
-  }, [selectedCat]);
-
-  const textFrom = (g, keys) => keys.map(k => String(g?.[k] ?? '')).join(' ').toLowerCase();
-  const hasWord = (g, word) => {
-    const w = String(word).toLowerCase();
-    const pool = [
-      textFrom(g, ['categories', 'collections', 'tags', 'type']),
-      g?.popular ? 'popular' : '',
-      g?.is_popular ? 'popular' : '',
-      g?.exclusive ? 'exclusive' : '',
-    ].join(' ');
-    return pool.includes(w);
-  };
-  const isProvider = (g, name) => String(g?.provider || '').toLowerCase().includes(String(name).toLowerCase());
-
-  const categoryMap = {
-    All:        () => true,
-    Popular:    g => hasWord(g, 'popular'),
-    Exclusive:  g => hasWord(g, 'exclusive'),
-    Arcade:     g => hasWord(g, 'arcade'),
-    Novomatic:  g => isProvider(g, 'novomatic'),
-    Amatic:     g => isProvider(g, 'amatic'),
-    Pragmatic:  g => isProvider(g, 'pragmatic'),
-    EGT:        g => isProvider(g, 'egt'),
-    Wazdan:     g => isProvider(g, 'wazdan'),
-    Aristocrat: g => isProvider(g, 'aristocrat'),
-  };
+  const dq = useDeferredValue(q);
+  const setQ = useCallback((val) => setQueries(prev => ({ ...prev, [selectedCat]: val })), [selectedCat]);
 
   const filteredGames = useMemo(() => {
-    const pred = categoryMap[selectedCat] || (() => true);
-    let out = games.filter(pred);
-    const s = dq.trim().toLowerCase();
-    if (s) {
-      out = out.filter(g =>
-        String(g?.name || '').toLowerCase().includes(s) ||
-        String(g?.provider || '').toLowerCase().includes(s)
-      );
+    const s = String(dq ?? '').trim().toLowerCase();
+    let out = games;
+    if (selectedCat !== 'All') {
+      const cat = selectedCat.toLowerCase();
+      out = out.filter(g => String(g?.provider || '').toLowerCase().includes(cat));
     }
+    if (s) out = out.filter(g =>
+      String(g?.name || '').toLowerCase().includes(s) ||
+      String(g?.provider || '').toLowerCase().includes(s)
+    );
     return normalizeAndDedupe(out);
   }, [games, selectedCat, dq]);
 
@@ -363,41 +253,70 @@ export default function Welcome() {
     return [...by.entries()].sort((a, b) => b[1].length - a[1].length);
   }, [filteredGames]);
 
+  // ------------ Spiel öffnen (Overlay iFrame) ------------
+  const [overlay, setOverlay] = useState(null); // { url, sessionId }
+  useEffect(() => {
+    const onPop = () => { if (document.body.classList.contains('body-game-open')) closeOverlay(); };
+    window.addEventListener('popstate', onPop);
+    const onMsg = (e) => {
+      const d = e?.data;
+      if (d === 'closeGame' || d === 'close' || d === 'notifyCloseContainer' ||
+          (typeof d === 'string' && d.indexOf('GAME_MODE:LOBBY') >= 0) || d?.closeGame !== undefined) {
+        closeOverlay();
+      }
+    };
+    window.addEventListener('message', onMsg);
+    return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('message', onMsg); };
+  }, []);
+
   async function openGame(gameId, options = {}) {
     try {
-      if (typeof window.openGameViaOverlay === 'function') {
-        await window.openGameViaOverlay(gameId, { ...options, demo: false });
+      const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
+      const res = await fetch('/api/games/open', {
+        method: 'POST',
+        credentials: 'include',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+          'X-Requested-With': 'XMLHttpRequest',
+          'X-CSRF-TOKEN': csrf,
+        },
+        body: JSON.stringify({ gameId, demo: !!options.demo }),
+      });
+      const data = await res.json();
+      if (data?.status !== 'success') throw new Error(data?.error || 'open_failed');
+
+      const withoutFrame = String(data.withoutFrame ?? '0') === '1';
+      if (!withoutFrame) {
+        setOverlay({ url: data.url, sessionId: data.sessionId || null });
+        document.body.classList.add('body-game-open');
+        try { history.pushState({ g: gameId }, '', window.location.href); } catch {}
       } else {
-        const res = await fetch('/api/games/open', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gameId, demo: false }),
-        });
-        const data = await res.json();
-        if (data?.status !== 'success') throw new Error(data?.error || 'open_failed');
         window.location.assign(data.url);
       }
-    } catch (e) { alert(e?.message || 'Spiel konnte nicht geöffnet werden.'); }
+    } catch (e) {
+      alert(e?.message || 'Spiel konnte nicht geöffnet werden.');
+    }
   }
 
-  // --- Suchfeld (dein Fokus-Fix bleibt erhalten) ------------------  :contentReference[oaicite:1]{index=1}
+
+  const closeOverlay = useCallback(() => {
+    setOverlay(null);
+    document.body.classList.remove('body-game-open');
+    try { history.back(); } catch {}
+  }, []);
+
   const SearchInput = memo(function SearchInput({ value, onChange, placeholder }) {
     const inputRef = useRef(null);
     const hadFocusRef = useRef(false);
     const vRef = useRef(value);
-
     useLayoutEffect(() => { vRef.current = value; }, [value]);
     useLayoutEffect(() => {
       if (hadFocusRef.current && inputRef.current && document.activeElement !== inputRef.current) {
         inputRef.current.focus({ preventScroll: true });
-        const val = String(vRef.current ?? '');
-        try { inputRef.current.setSelectionRange(val.length, val.length); } catch {}
+        const val = String(vRef.current ?? ''); try { inputRef.current.setSelectionRange(val.length, val.length); } catch {}
       }
     });
-
-    const onFocus = () => { hadFocusRef.current = true; };
-    const onBlur  = () => { hadFocusRef.current = false; };
-    const onKeyDown = (e) => { e.stopPropagation(); };
-
     return (
       <div className="w-full sm:w-72">
         <div className="relative">
@@ -406,9 +325,6 @@ export default function Welcome() {
             type="search"
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            onKeyDown={onKeyDown}
-            onFocus={onFocus}
-            onBlur={onBlur}
             placeholder={placeholder}
             autoComplete="off"
             className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 pr-9 text-sm placeholder-white/50 outline-none focus:border-cyan-400/40"
@@ -427,56 +343,78 @@ export default function Welcome() {
       <Head title="Welcome">
         <link rel="icon" type="image/svg+xml" href="/img/play4cash-mark.svg" />
       </Head>
-      <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: PERF_CSS }} />
+
       <div className="min-h-screen bg-[#0a1726] text-white selection:bg-cyan-400/30">
         <Header
           user={user}
           initials={initials}
           balanceText={balanceText}
           selectedCat={selectedCat}
-          setSelectedCat={(cat) => setSelectedCat(cat)}
+          setSelectedCat={setSelectedCat}
+          providerTabs={providerTabs}
         />
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24">
           <div className="h-3" />
           <Hero />
 
-          {loading && <div className="mt-8 text-white/80">Lade Spiele…</div>}
-          {(!loading && loadErr) && <div className="mt-8 text-rose-300">Fehler: {loadErr}</div>}
-
-          {(!loading && !loadErr) && (
-            <div className="space-y-10 mt-8">
-              {selectedCat === 'All' ? (
-                <>
-                  <SectionCarousel
-                    title="All Games"
-                    items={filteredGames}
-                    onPlay={openGame}
-                    rightNode={<SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} />}
-                  />
-                  {providers.slice(0, 6).map(([providerName, list]) => (
-                    <SectionCarousel key={providerName} title={`Best of ${providerName}`} items={list} onPlay={openGame} />
-                  ))}
-                </>
-              ) : (
-                <SectionGridVirtualized
-                  title={`${selectedCat} Games`}
+          <div className="space-y-10 mt-8">
+            {loadingGames ? (
+              <div className="text-white/70">Lade Spiele…</div>
+            ) : gamesError ? (
+              <div className="text-red-300">{gamesError}</div>
+            ) : selectedCat === 'All' ? (
+              <>
+                <SectionCarousel
+                  title="All Games"
                   items={filteredGames}
                   onPlay={openGame}
                   rightNode={<SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} />}
                 />
-              )}
-            </div>
-          )}
+                {providers.slice(0, 6).map(([providerName, list]) => (
+                  <SectionCarousel key={providerName} title={`Best of ${providerName}`} items={list} onPlay={openGame} />
+                ))}
+              </>
+            ) : (
+              <SectionGridVirtualized
+                title={`${selectedCat} Games`}
+                items={filteredGames}
+                onPlay={openGame}
+                rightNode={<SearchInput value={q} onChange={setQ} placeholder={searchPlaceholder} />}
+              />
+            )}
+          </div>
         </main>
         <Footer />
       </div>
+
+      {/* Game Overlay (iFrame) */}
+      {overlay && (
+        <div className="fixed inset-0 z-[100] bg-black/90">
+          <button
+            onClick={closeOverlay}
+            className="absolute top-3 left-3 z-[110] px-3 py-1.5 rounded-lg bg-white text-black text-sm font-semibold"
+            aria-label="Close game"
+          >
+            Close
+          </button>
+          <iframe
+            id="gameFrame"
+            title="Game"
+            src={overlay.url}
+            className="absolute inset-0 w-full h-full border-0"
+            allow="autoplay; fullscreen; clipboard-read; clipboard-write"
+            allowFullScreen
+          />
+        </div>
+      )}
     </AuthenticatedLayout>
   );
 }
 
-/* ------------------------------ Header (mit passiven Listenern) ------------------------------ */
-function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
+/* ------------------------------ Header ------------------------------ */
+function Header({ user, initials, balanceText, selectedCat, setSelectedCat, providerTabs }) {
   const [openProfile, setOpenProfile] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
@@ -486,34 +424,22 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
   if (user?.role) roleNames.push(user.role);
   if (Array.isArray(user?.roles)) for (const r of user.roles) roleNames.push(typeof r === 'string' ? r : r?.name);
   const roleSet = new Set(roleNames.filter(Boolean).map(s => String(s).toLowerCase()));
-
   const isAdmin = Boolean(user?.is_admin) || roleSet.has('admin') || roleSet.has('administrator');
   const isRunner = Boolean(user?.is_runner) || roleSet.has('runner');
 
-  // passiver, gedrosselter Scroll-Listener
-  const onScrollThrottled = useThrottleFn(() => setScrolled(window.scrollY > 6), 100);
-  useEffect(() => {
-    onScrollThrottled();
-    window.addEventListener('scroll', onScrollThrottled, { passive: true });
-    return () => window.removeEventListener('scroll', onScrollThrottled);
-  }, [onScrollThrottled]);
+  const onScrollRaf = useRafThrottle(() => setScrolled(window.scrollY > 6));
+  useEffect(() => { onScrollRaf(); window.addEventListener('scroll', onScrollRaf, { passive: true }); return () => window.removeEventListener('scroll', onScrollRaf); }, [onScrollRaf]);
 
   useEffect(() => {
-    const onDoc = (e) => {
-      if (!headerRef.current) return;
-      if (!headerRef.current.contains(e.target)) setOpenProfile(false);
-    };
+    const onDoc = (e) => { if (!headerRef.current) return; if (!headerRef.current.contains(e.target)) setOpenProfile(false); };
     document.addEventListener('click', onDoc);
     return () => document.removeEventListener('click', onDoc);
   }, []);
-
   useEffect(() => {
     const onEsc = (e) => { if (e.key === 'Escape') { setOpenProfile(false); setDrawerOpen(false); } };
     window.addEventListener('keydown', onEsc, { passive: true });
     return () => window.removeEventListener('keydown', onEsc);
   }, []);
-
-  const categories = ['All','Popular','Exclusive','Arcade','Novomatic','Amatic','Pragmatic','EGT','Wazdan','Aristocrat'];
 
   return (
     <div ref={headerRef} className="sticky top-0 z-50">
@@ -525,7 +451,6 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
                 <img src="/img/play4cash-logo-horizontal.svg" alt="play4cash" className="h-6 w-auto select-none" draggable="false" />
               </Link>
             </div>
-
             <div className="flex items-center gap-2">
               <button
                 className="sm:hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition"
@@ -534,13 +459,11 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
               >
                 <DotsIcon /><span className="text-sm">Categories</span>
               </button>
-
               <div className="hidden sm:flex items-center gap-1 mr-2 select-text">
                 <span className="px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-sm cursor-default" aria-label="Current balance">
                   {balanceText}
                 </span>
               </div>
-
               <div className="relative ml-1">
                 <button onClick={() => setOpenProfile(v => !v)} aria-haspopup="menu" aria-label="Profile menu" aria-expanded={openProfile} className="block">
                   <Avatar imgUrl={user?.profile_photo_url} initials={initials} />
@@ -559,11 +482,11 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
         </div>
       </div>
 
-      {/* Kategorien-Zeile */}
+      {/* Tabs */}
       <div className="relative z-10 bg-[#0b1b2b]/85 backdrop-blur supports-[backdrop-filter]:backdrop-blur-md border-y border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="hidden sm:flex items-center gap-2 overflow-x-auto no-scrollbar py-2">
-            {categories.map(cat => (
+            {providerTabs.map(cat => (
               <button
                 key={cat}
                 onClick={() => setSelectedCat(cat)}
@@ -579,7 +502,7 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
         </div>
       </div>
 
-      {/* Mobile Kategorien Drawer */}
+      {/* Mobile Drawer */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 sm:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
@@ -589,7 +512,7 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat }) {
               <button className="p-2 rounded-lg hover:bg-white/10" onClick={() => setDrawerOpen(false)} aria-label="Close drawer"><XIcon /></button>
             </div>
             <div className="grid grid-cols-2 gap-2">
-              {['All','Popular','Exclusive','Arcade','Novomatic','Amatic','Pragmatic','EGT','Wazdan','Aristocrat'].map(cat => (
+              {providerTabs.map(cat => (
                 <button
                   key={cat}
                   onClick={() => { setSelectedCat(cat); setDrawerOpen(false); }}
@@ -619,7 +542,6 @@ function Avatar({ imgUrl, initials }) {
     </div>
   );
 }
-
 function MenuCard({ children, align = 'left' }) {
   return (
     <div role="menu" className={`absolute z-[80] mt-2 ${align === 'right' ? 'right-0' : 'left-0'} w-44 rounded-xl bg-[#0f2236] border border-white/10 shadow-lg overflow-hidden`}>
@@ -650,57 +572,48 @@ function Hero() {
   );
 }
 
-/* --------------------------- Carousels (passiv + throttled) --------------------------- */
+/* --------------------------- Carousels --------------------------- */
 function SectionCarousel({ title, items, onPlay, rightNode = null }) {
   const scrollerRef = useRef(null);
   const [canL, setCanL] = useState(false);
   const [canR, setCanR] = useState(true);
 
-  const update = useThrottleFn(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
+  const update = useRafThrottle(() => {
+    const el = scrollerRef.current; if (!el) return;
     setCanL(el.scrollLeft > 4);
     setCanR(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
-  }, 100);
+  });
 
   useEffect(() => {
-    const el = scrollerRef.current;
-    if (!el) return;
+    const el = scrollerRef.current; if (!el) return;
     update();
     el.addEventListener('scroll', update, { passive: true });
-    window.addEventListener('resize', update, { passive: true });
-    return () => { el.removeEventListener('scroll', update); window.removeEventListener('resize', update); };
+    const onResize = () => update();
+    window.addEventListener('resize', onResize, { passive: true });
+    return () => { el.removeEventListener('scroll', update); window.removeEventListener('resize', onResize); };
   }, [update]);
 
   const scrollBy = (dir) => {
-    const el = scrollerRef.current;
-    if (!el) return;
+    const el = scrollerRef.current; if (!el) return;
     const delta = Math.round(el.clientWidth * 0.9) * (dir === 'left' ? -1 : 1);
     el.scrollBy({ left: delta, behavior: 'smooth' });
   };
 
   return (
-    <section aria-label={title}>
+    <section aria-label={title} className="island">
       <div className="flex items-center justify-between mb-3 gap-3">
         <h2 className="text-lg sm:text-xl font-semibold truncate">{title}</h2>
         {rightNode}
       </div>
-
       <div className="relative group">
         <button
           className={`hidden md:grid place-items-center absolute -left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/10 border border-white/15 hover:bg-white/20 transition ${canL ? 'opacity-100' : 'opacity-0 pointer-events-none'} md:group-hover:opacity-100`}
           onClick={() => scrollBy('left')}
           aria-label="Scroll left"
         ><ArrowLeftIcon /></button>
-
-        <div
-          ref={scrollerRef}
-          className="flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-smooth pr-1"
-          onWheel={(e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.currentTarget.scrollLeft += e.deltaY; } }}
-        >
+        <div ref={scrollerRef} className="flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-smooth pr-1">
           {items.map((g) => <GameCard key={gameReactKey(g)} game={g} onPlay={openGameProxy(onPlay)} variant="carousel" />)}
         </div>
-
         <button
           className={`hidden md:grid place-items-center absolute -right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/10 border border-white/15 hover:bg-white/20 transition ${canR ? 'opacity-100' : 'opacity-0 pointer-events-none'} md:group-hover:opacity-100`}
           onClick={() => scrollBy('right')}
@@ -711,68 +624,45 @@ function SectionCarousel({ title, items, onPlay, rightNode = null }) {
   );
 }
 
-/* --------------------------- Virtualized Grid (Kategorien) --------------------------- */
+/* --------------------------- Virtualized Grid --------------------------- */
 function SectionGridVirtualized({ title, items, onPlay, rightNode = null }) {
   const [wrapRef, rect] = useMeasure();
   const { h: winH } = useWindowSize();
-
-  // Spalten ähnlich deiner Tailwind-Grid Breakpoints
   const cols = useMemo(() => {
     const w = rect.width || 0;
     if (w >= 1280) return 6;
-    if (w >= 768) return 4;
-    if (w >= 640) return 3;
+    if (w >= 768)  return 4;
+    if (w >= 640)  return 3;
     return 2;
   }, [rect.width]);
-
-  const gap = 12; // px, entspricht Tailwind gap-3
+  const gap = 12;
   const cellW = Math.max(100, Math.floor((rect.width - (cols - 1) * gap) / cols));
-  const cellH = Math.round(cellW * 9 / 16); // aspect-video
-  const rowH  = cellH + 0; // ggf. Reserve hinzufügen
-
+  const cellH = Math.round(cellW * 9 / 16);
+  const rowH  = cellH;
   const rows = Math.ceil(items.length / cols);
-  const listHeight = Math.min(winH * 0.9, rows * rowH + Math.max(0, (rows - 1) * 0)); // eigener Scroll, 90% Viewport
-
+  const listHeight = Math.min(winH * 0.9, rows * rowH);
   const Row = ({ index, style }) => {
     const start = index * cols;
     const rowItems = items.slice(start, start + cols);
     return (
       <div style={style}>
-        <div className="grid" style={{
-          display: 'grid',
-          gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`,
-          gap: `${gap}px`,
-          paddingBottom: '12px'
-        }}>
+        <div className="grid" style={{ display:'grid', gridTemplateColumns:`repeat(${cols}, minmax(0, 1fr))`, gap:`${gap}px`, paddingBottom:'12px' }}>
           {rowItems.map((g) => (
             <GameCard key={gameReactKey(g)} game={g} onPlay={openGameProxy(onPlay)} variant="grid" heightPx={cellH} />
           ))}
-          {/* Leere Felder auffüllen für saubere Heights (optional) */}
-          {rowItems.length < cols && Array.from({ length: cols - rowItems.length }).map((_, i) => (
-            <div key={`ph-${i}`} />
-          ))}
+          {rowItems.length < cols && Array.from({ length: cols - rowItems.length }).map((_, i) => <div key={`ph-${i}`} />)}
         </div>
       </div>
     );
   };
-
   return (
-    <section aria-label={title} ref={wrapRef}>
+    <section aria-label={title} ref={wrapRef} className="island">
       <div className="flex items-center justify-between mb-3 gap-3">
         <h2 className="text-lg sm:text-xl font-semibold truncate">{title}</h2>
         {rightNode}
       </div>
-
-      {/* Virtuelle Liste mit eigenem Scroll-Container */}
-      <div className="rounded-xl border border-white/10" style={{ height: listHeight, overflow: 'auto', willChange: 'transform' }}>
-        <List
-          height={listHeight}
-          itemCount={rows}
-          itemSize={rowH + 12} // +gap-bottom
-          width={rect.width || 0}
-          overscanCount={3}
-          className="no-scrollbar"
-        >
+      <div className="rounded-xl border border-white/10" style={{ height: listHeight, overflow: 'auto' }}>
+        <List height={listHeight} itemCount={rows} itemSize={rowH + 12} width={rect.width || 0} overscanCount={1} className="no-scrollbar">
           {Row}
         </List>
       </div>
@@ -782,7 +672,6 @@ function SectionGridVirtualized({ title, items, onPlay, rightNode = null }) {
 
 /* --------------------------- Game Card --------------------------- */
 function openGameProxy(onPlay) { return (id, opt) => onPlay?.(id, opt); }
-
 function gameReactKey(g) {
   const p = String(g?.provider || '').toLowerCase();
   if (g?.uid) return `uid:${g.uid}`;
@@ -794,35 +683,20 @@ function gameReactKey(g) {
   if (name) return `name:${p}#${name}`;
   return `${p}-${Math.random().toString(36).slice(2)}`;
 }
-
 function GameCard({ game, onPlay, variant = 'carousel', heightPx }) {
   const title = game.name || `Game ${game.id}`;
   const provider = game.provider || 'Provider';
   const img = game.img || TRANSPARENT_PX;
-
   const containerCls = variant === 'grid'
     ? 'w-full'
     : 'snap-start flex-shrink-0 basis-1/2 sm:basis-1/2 md:basis-1/4 xl:basis-1/6';
-
-  const styleAspect = variant === 'grid' && heightPx
-    ? { height: `${heightPx}px` }
-    : undefined;
-
+  const styleAspect = variant === 'grid' && heightPx ? { height: `${heightPx}px` } : undefined;
   return (
     <article className={containerCls} aria-label={title}>
       <div className="relative rounded-xl overflow-hidden group/card bg-[#0d2236] border border-white/10"
            style={variant === 'grid' ? styleAspect : { aspectRatio: '16 / 9' }}>
-        {/* Thumb: LazyImage + keine teuren CSS-Effekte */}
-        <LazyImage
-          src={img}
-          alt={title}
-          className="absolute inset-0 w-full h-full object-cover"
-        />
-
-        {/* Provider-Tag (sehr leichtgewichtig) */}
+        <LazyImage src={img} alt={title} className="absolute inset-0 w-full h-full object-cover" />
         <div className="absolute left-2 top-2 px-2 py-1 rounded-md bg-black/50 text-[10px] leading-none">{provider}</div>
-
-        {/* Hover: Titel + Button */}
         <div className="absolute inset-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
           <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/60 to-transparent">
             <div className="text-xs font-medium truncate">{title}</div>
@@ -850,7 +724,7 @@ function Footer() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="grid gap-6 md:grid-cols-2 items-center">
           <div className="flex flex-wrap items-center gap-3">
-            <PayIcon label="Comming soon: Crypto" />
+            <PayIcon label="Coming soon: Crypto" />
             <PayIcon label="Wallet" />
             <span className="text-white/60 text-sm ml-1">24/7 Support</span>
           </div>
@@ -914,7 +788,3 @@ function PayIcon({ label }) {
     </div>
   );
 }
-
-/* ------------------------------ Utils ------------------------------ */
-const TRANSPARENT_PX =
-  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y1Q7u8AAAAASUVORK5CYII=';

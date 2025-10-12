@@ -20,28 +20,27 @@ Route::get('/', fn () => auth()->check()
 
 require __DIR__ . '/auth.php';
 
+Route::get('/welcome', function () {
+    return Inertia::render('Welcome');
+})->name('welcome');
+
 // Gäste: Invite
 Route::middleware('guest')->group(function () {
     Route::get('/invite/{token}', [InvitationController::class, 'showRegistrationForm'])
-        ->middleware('invite_token')
-        ->name('invite.show');
-
+        ->middleware('invite_token')->name('invite.show');
     Route::post('/invite/{token}', [InvitationController::class, 'register'])
-        ->middleware('invite_token')
-        ->name('invite.register');
+        ->middleware('invite_token')->name('invite.register');
 });
 
-// Auth
+Route::middleware(['web', 'auth'])->group(function () {
+    Route::get('/api/games/list', [GamesApiController::class, 'list']);
+    Route::post('/api/games/open', [GamesApiController::class, 'open']);
+});
+
+Route::get('/games/exit', fn () => redirect()->route('welcome'))->name('games.exit');
+
+
 Route::middleware('auth')->group(function () {
-    // Optional: Lobby-Seite
-    Route::get('/games', fn () => Inertia::render('Games/Lobby'))->name('games.lobby');
-
-    // ---- GAMES API (über Web-Session + CSRF) ----
-    Route::post('/api/games/list', [GamesApiController::class, 'list'])->name('games.list');
-    Route::post('/api/games/open', [GamesApiController::class, 'open'])->name('games.open');
-
-    // Exit-Seite (iFrame, sendet postMessage)
-    Route::view('/close.php', 'games.close')->name('games.exit');
 
     // Breeze Profile
     Route::get('/profile',  [ProfileController::class, 'edit'])->name('profile.edit');
@@ -51,63 +50,32 @@ Route::middleware('auth')->group(function () {
     // Avatar-Placeholder
     Route::get('/avatar/placeholder', [AvatarController::class, 'placeholder'])->name('avatar.placeholder');
 
-    // ---------- BALANCE (JSON für Polling) ----------
-    // Bevorzugter Endpoint, den dein Frontend alle 2s aufruft
-    Route::get('/api/me/balance', [BalanceController::class, 'me'])
-        ->name('api.me.balance');
-
-    // Kompatible Aliase (falls dein Frontend andere Kandidaten probiert)
-    Route::get('/api/balance/me', [BalanceController::class, 'me']);   // alt
-    Route::get('/api/user/balance', [BalanceController::class, 'me']); // alias
-
-    // Fallback: Liefert den eingeloggten User inkl. Balance/Currency
+    // ---------- BALANCE (JSON Polling) ----------
+    Route::get('/api/me/balance', [BalanceController::class, 'me'])->name('api.me.balance');
     Route::get('/api/me', function (Request $request) {
         $u = $request->user();
-        return response()
-            ->json([
-                'user' => [
-                    'id'       => $u->id,
-                    'name'     => $u->name,
-                    'username' => $u->username ?? null,
-                    'balance'  => (float)($u->balance ?? 0),
-                    'currency' => $u->currency ?? 'EUR',
-                ],
-            ])
-            ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-            ->header('Pragma', 'no-cache');
+        return response()->json([
+            'user' => [
+                'id'       => $u->id,
+                'name'     => $u->name,
+                'username' => $u->username ?? null,
+                'balance'  => (float)($u->balance ?? 0),
+                'currency' => $u->currency ?? 'EUR',
+            ],
+        ])->header('Cache-Control','no-store, no-cache, must-revalidate, max-age=0')
+          ->header('Pragma','no-cache');
     })->name('api.me');
-
-    // Optionaler Alias für /api/user
-    Route::get('/api/user', function (Request $request) {
-        $u = $request->user();
-        return response()
-            ->json([
-                'user' => [
-                    'id'       => $u->id,
-                    'name'     => $u->name,
-                    'username' => $u->username ?? null,
-                    'balance'  => (float)($u->balance ?? 0),
-                    'currency' => $u->currency ?? 'EUR',
-                ],
-            ])
-            ->header('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0')
-            ->header('Pragma', 'no-cache');
-    })->name('api.user');
 
     // ---------- ADMIN ----------
     Route::middleware('role:Admin')->prefix('admin')->name('admin.')->group(function () {
         Route::get('/', [AdminController::class, 'index'])->name('index');
         Route::get('/users', [AdminController::class, 'index'])->name('users');
-
         Route::post('/invite', [InvitationController::class, 'create'])->name('invite');
         Route::post('/users/{user}/assign-runner', [AdminController::class, 'assignRunner'])->name('assignRunner');
         Route::post('/users/{user}/role/set', [AdminController::class, 'setRole'])->name('setRole');
         Route::delete('/users/{user}', [AdminController::class, 'destroy'])->name('users.destroy');
         Route::get('/logs', [BalanceController::class, 'index'])->name('logs');
-
-        // Limits
-        Route::post('/runners/{runner}/limits', [AdminController::class, 'updateRunnerLimits'])
-            ->name('runners.updateLimits');
+        Route::post('/runners/{runner}/limits', [AdminController::class, 'updateRunnerLimits'])->name('runners.updateLimits');
     });
 
     // ---------- RUNNER ----------
@@ -116,15 +84,13 @@ Route::middleware('auth')->group(function () {
         Route::get('/logs', [BalanceController::class, 'index'])->name('logs');
     });
 
-    // Balance (Admin|Runner) – Update
+    // Balance Update (Admin|Runner)
     Route::post('/users/{user}/balance', [BalanceController::class, 'update'])
-        ->middleware('role:Admin|Runner')
-        ->name('balance.update');
+        ->middleware('role:Admin|Runner')->name('balance.update');
 
     // Welcome & Dashboard (verifiziert)
     Route::middleware('verified')->group(function () {
-        Route::get('/welcome', fn () => Inertia::render('Welcome'))->name('welcome');
-
+        
         Route::get('/dashboard', function () {
             $user = auth()->user();
             if (method_exists($user, 'hasRole')) {

@@ -6,9 +6,12 @@ use Illuminate\Foundation\Http\Middleware\VerifyCsrfToken as Middleware;
 
 class VerifyCsrfToken extends Middleware
 {
-    // ...
+    /**
+     * Diese URIs sind vom CSRF-Schutz ausgenommen.
+     *
+     * @var array<int, string>
+     */
     protected $except = [
-        'api/games/*',   // <— hier eintragen (ohne führenden Slash)
-        // 'api/games/*',        // (optional) wenn du alle Games-API-Postings ausnehmen willst
+        'api/*',            // alle API-Endpoints stateless
     ];
 }
