@@ -5,12 +5,12 @@ import React, {
 } from 'react';
 import { Head, usePage, Link } from '@inertiajs/react';
 import AuthenticatedLayout from '@/Layouts/AuthenticatedLayout';
-import { List } from 'react-window';
 
 /* ------------------------------ CSS ------------------------------ */
 const PERF_CSS = `
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+.touch-momentum { -webkit-overflow-scrolling: touch; }
 @supports (content-visibility: auto) {
   .island { content-visibility: auto; contain-intrinsic-size: 800px 450px; }
 }
@@ -19,6 +19,34 @@ const PERF_CSS = `
 }
 .body-game-open { overflow: hidden; }
 `;
+
+const PROVIDER_TABS = [
+  'All','novomatic','ainsworth','pragmatic','NetEnt','microgaming','scientific_games','aristocrat',
+  'quickspin','igt','scratch','igrosoft','amatic','apex','merkur','table_games','gclub',
+  'habanero','apollo','wazdan','egt','roulette','bingo','keno'
+];
+
+const CATEGORY_PAGE_SIZE = 25;
+
+const hasWindow = typeof window !== 'undefined';
+const hasNavigator = typeof navigator !== 'undefined';
+const hasDocument = typeof document !== 'undefined';
+const nav = hasNavigator ? navigator : undefined;
+
+const isIOSDevice = !!nav && (
+  /iP(ad|hone|od)/.test(nav.userAgent || '') ||
+  (nav.platform === 'MacIntel' && nav.maxTouchPoints > 1)
+);
+const supportsResizeObserver = hasWindow && 'ResizeObserver' in window;
+const supportsIntersectionObserver = hasWindow && 'IntersectionObserver' in window;
+const supportsNativeSmoothScroll = (() => {
+  if (!hasDocument || !document.documentElement) return false;
+  try {
+    return 'scrollBehavior' in document.documentElement.style;
+  } catch {
+    return false;
+  }
+})();
 
 /* ------------------------------ Utils ------------------------------ */
 function useRafThrottle(fn) {
@@ -36,12 +64,27 @@ function useMeasure() {
   const ref = useRef(null);
   const [rect, setRect] = useState({ width: 0, height: 0 });
   useEffect(() => {
-    if (!ref.current) return;
-    const ro = new ResizeObserver(([e]) => {
-      if (e?.contentRect) setRect({ width: e.contentRect.width, height: e.contentRect.height });
-    });
-    ro.observe(ref.current);
-    return () => ro.disconnect();
+    const el = ref.current;
+    if (!el) return;
+
+    const readRect = () => {
+      const width = el.offsetWidth || el.clientWidth || 0;
+      const height = el.offsetHeight || el.clientHeight || 0;
+      setRect((prev) => (prev.width === width && prev.height === height) ? prev : { width, height });
+    };
+
+    readRect();
+
+    if (supportsResizeObserver) {
+      const ro = new ResizeObserver(() => readRect());
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+
+    if (hasWindow) {
+      window.addEventListener('resize', readRect, { passive: true });
+      return () => window.removeEventListener('resize', readRect);
+    }
   }, []);
   return [ref, rect];
 }
@@ -55,24 +98,30 @@ function useWindowSize() {
 /* ------------------------------ Image utils ------------------------------ */
 const TRANSPARENT_PX =
   'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y1Q7u8AAAAASUVORK5CYII=';
+const IMAGE_PREFETCH_CACHE = new Set();
 
-const LazyImage = memo(function LazyImage({ src, alt, className }) {
+const LazyImage = memo(function LazyImage({ src, alt, className, style }) {
   const imgRef = useRef(null);
   const [inView, setInView] = useState(false);
   useEffect(() => {
     const el = imgRef.current; if (!el) return;
+    if (!supportsIntersectionObserver) {
+      setInView(true);
+      return;
+    }
     const io = new IntersectionObserver((entries) => {
       for (const e of entries) if (e.isIntersecting) { setInView(true); io.disconnect(); break; }
-    }, { rootMargin: '300px' });
+    }, { rootMargin: '600px' });
     io.observe(el);
     return () => io.disconnect();
   }, []);
   return (
     <img
       ref={imgRef}
-      src={inView ? src : undefined}
+      src={inView ? src : TRANSPARENT_PX}
       alt={alt}
       className={className}
+      style={style}
       loading="lazy"
       decoding="async"
       fetchpriority="low"
@@ -106,6 +155,52 @@ const pickImage = (g) => {
   for (const x of cands) if (isMeaningfulUrl(x)) return String(x);
   return TRANSPARENT_PX;
 };
+const isHttpUrl = (src) => /^https?:/i.test(src || '');
+
+function usePrefetchImages(games, options = {}) {
+  const {
+    initialCount = 32,
+    range = null,
+    buffer = 24,
+    onlyIOS = true,
+  } = options;
+  const trackersRef = useRef([]);
+
+  useEffect(() => () => {
+    trackersRef.current = [];
+  }, []);
+
+  const queueImage = useCallback((candidate) => {
+    if (!isMeaningfulUrl(candidate) || !isHttpUrl(candidate)) return;
+    if (IMAGE_PREFETCH_CACHE.has(candidate)) return;
+    if (typeof Image === 'undefined') return;
+    const img = new Image();
+    img.decoding = 'async';
+    img.loading = 'lazy';
+    img.src = candidate;
+    trackersRef.current.push(img);
+    IMAGE_PREFETCH_CACHE.add(candidate);
+  }, []);
+
+  useEffect(() => {
+    if ((onlyIOS && !isIOSDevice) || !Array.isArray(games) || games.length === 0) return;
+    let count = 0;
+    for (const game of games) {
+      queueImage(pickImage(game));
+      count += 1;
+      if (count >= initialCount) break;
+    }
+  }, [games, initialCount, onlyIOS, queueImage]);
+
+  useEffect(() => {
+    if ((onlyIOS && !isIOSDevice) || !range || !Array.isArray(games) || games.length === 0) return;
+    const startIdx = Math.max(0, range.start - buffer);
+    const endIdx = Math.min(games.length - 1, range.end + buffer);
+    for (let i = startIdx; i <= endIdx; i += 1) {
+      queueImage(pickImage(games[i]));
+    }
+  }, [games, range?.start, range?.end, buffer, onlyIOS, queueImage]);
+}
 const buildKeyCandidates = (g) => {
   const idCands = [g?.uid, g?.uuid, g?.game_id, g?.sys_id, g?.id, g?.slug, g?.code, g?.key, g?.external_id].filter(v => v != null);
   const nameN = normalizeName(getName(g));
@@ -131,7 +226,19 @@ function normalizeAndDedupe(list) {
     const provider = String(getProvider(raw) || '').trim();
     const img = pickImage(raw);
     const { keys, nameN, provN } = buildKeyCandidates(raw);
-    const norm = { ...raw, name, provider, img, _nameN: nameN, _provN: provN };
+    const nameLower = name.toLowerCase();
+    const providerLower = provider.toLowerCase();
+    const searchText = [nameLower, providerLower, nameN, provN].filter(Boolean).join('|');
+    const norm = {
+      ...raw,
+      name,
+      provider,
+      img,
+      _nameN: nameN,
+      _provN: provN,
+      _providerL: providerLower,
+      _searchText: searchText,
+    };
 
     let bucketKey = null;
     for (const k of keys) if (map.has(k)) { bucketKey = k; break; }
@@ -149,6 +256,7 @@ function normalizeAndDedupe(list) {
 export default function Welcome() {
   const { props } = usePage();
   const user = props?.auth?.user || {};
+  const preconnectRef = useRef(new Set());
 
   // Live-Balance
   const [liveBalance, setLiveBalance] = useState(Number(user.balance ?? 0));
@@ -192,19 +300,23 @@ export default function Welcome() {
 
   useEffect(() => {
     let alive = true;
+    let controller;
     (async () => {
       try {
         setLoadingGames(true);
+        if (typeof AbortController !== 'undefined') controller = new AbortController();
         const res = await fetch('/api/games/list?img=game_img_2', {
           method: 'GET',
           headers: { 'Accept': 'application/json' },
           credentials: 'include',
-          cache: 'no-store',
+          cache: 'no-cache',
+          signal: controller?.signal,
         });
         const json = await res.json().catch(() => null);
         const list = Array.isArray(json?.games) ? json.games : Array.isArray(json) ? json : [];
         if (alive) {
-          setGames(normalizeAndDedupe(list));
+          const normalized = normalizeAndDedupe(list);
+          setGames(normalized);
           setGamesError(list.length ? '' : 'Keine Spiele gefunden.');
         }
       } catch {
@@ -213,16 +325,12 @@ export default function Welcome() {
         if (alive) setLoadingGames(false);
       }
     })();
-    return () => { alive = false; };
+    return () => { alive = false; controller?.abort(); };
   }, []);
 
   // ------------ Kategorien & Suche (Tabs aus Doku) ------------
-  const providerTabs = [
-    'All','novomatic','ainsworth','pragmatic','NetEnt','microgaming','scientific_games','aristocrat',
-    'quickspin','igt','scratch','igrosoft','amatic','apex','merkur','table_games','gclub',
-    'habanero','apollo','wazdan','egt','roulette','bingo','keno'
-  ];
   const [selectedCat, setSelectedCat] = useState('All');
+  const providerTabs = PROVIDER_TABS;
   const [queries, setQueries] = useState({});
   const q = queries[selectedCat] ?? '';
   const dq = useDeferredValue(q);
@@ -233,13 +341,12 @@ export default function Welcome() {
     let out = games;
     if (selectedCat !== 'All') {
       const cat = selectedCat.toLowerCase();
-      out = out.filter(g => String(g?.provider || '').toLowerCase().includes(cat));
+      out = out.filter(g => g?._providerL?.includes(cat));
     }
-    if (s) out = out.filter(g =>
-      String(g?.name || '').toLowerCase().includes(s) ||
-      String(g?.provider || '').toLowerCase().includes(s)
-    );
-    return normalizeAndDedupe(out);
+    if (s) {
+      out = out.filter(g => g?._searchText?.includes(s));
+    }
+    return out;
   }, [games, selectedCat, dq]);
 
   const providers = useMemo(() => {
@@ -250,6 +357,41 @@ export default function Welcome() {
       by.get(p).push(g);
     }
     return [...by.entries()].sort((a, b) => b[1].length - a[1].length);
+  }, [filteredGames]);
+
+  usePrefetchImages(filteredGames, { initialCount: Math.min(filteredGames.length || 0, 64), onlyIOS: false });
+  useEffect(() => {
+    if (!hasDocument || !hasWindow) return;
+    const head = document.head;
+    if (!head) return;
+    const seen = new Set();
+    const origins = [];
+    for (const game of filteredGames) {
+      if (origins.length >= 4) break;
+      const img = pickImage(game);
+      if (!isMeaningfulUrl(img) || !isHttpUrl(img)) continue;
+      try {
+        const url = new URL(img, window.location.href);
+        const origin = url.origin;
+        if (origin === window.location.origin) continue;
+        if (!seen.has(origin)) {
+          seen.add(origin);
+          origins.push(origin);
+        }
+      } catch {
+        continue;
+      }
+    }
+    const cache = preconnectRef.current;
+    for (const origin of origins) {
+      if (cache.has(origin)) continue;
+      const link = document.createElement('link');
+      link.rel = 'preconnect';
+      link.href = origin;
+      link.crossOrigin = 'anonymous';
+      head.appendChild(link);
+      cache.add(origin);
+    }
   }, [filteredGames]);
 
   // ------------ Spiel öffnen (Overlay iFrame) ------------
@@ -268,7 +410,7 @@ export default function Welcome() {
     return () => { window.removeEventListener('popstate', onPop); window.removeEventListener('message', onMsg); };
   }, []);
 
-  async function openGame(gameId, options = {}) {
+  const openGame = useCallback(async (gameId, options = {}) => {
     try {
       const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
       const res = await fetch('/api/games/open', {
@@ -296,7 +438,7 @@ export default function Welcome() {
     } catch (e) {
       alert(e?.message || 'Spiel konnte nicht geöffnet werden.');
     }
-  }
+  }, []);
 
 
   const closeOverlay = useCallback(() => {
@@ -304,35 +446,6 @@ export default function Welcome() {
     document.body.classList.remove('body-game-open');
     try { history.back(); } catch {}
   }, []);
-
-  const SearchInput = memo(function SearchInput({ value, onChange, placeholder }) {
-    const inputRef = useRef(null);
-    const hadFocusRef = useRef(false);
-    const vRef = useRef(value);
-    useLayoutEffect(() => { vRef.current = value; }, [value]);
-    useLayoutEffect(() => {
-      if (hadFocusRef.current && inputRef.current && document.activeElement !== inputRef.current) {
-        inputRef.current.focus({ preventScroll: true });
-        const val = String(vRef.current ?? ''); try { inputRef.current.setSelectionRange(val.length, val.length); } catch {}
-      }
-    });
-    return (
-      <div className="w-full sm:w-72">
-        <div className="relative">
-          <input
-            ref={inputRef}
-            type="search"
-            value={value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder={placeholder}
-            autoComplete="off"
-            className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 pr-9 text-sm placeholder-white/50 outline-none focus:border-cyan-400/40"
-          />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60" aria-hidden="true"><SearchIcon /></span>
-        </div>
-      </div>
-    );
-  });
 
   const searchPlaceholder = selectedCat === 'All' ? 'Search games or providers…' : `Search in ${selectedCat}…`;
 
@@ -450,20 +563,13 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
                 <img src="/img/play4cash-logo-horizontal.svg" alt="play4cash" className="h-6 w-auto select-none" draggable="false" />
               </Link>
             </div>
-            <div className="flex items-center gap-2">
-              <button
-                className="sm:hidden inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 hover:bg-white/10 transition"
-                onClick={() => { setDrawerOpen(true); setOpenProfile(false); }}
-                aria-label="Open categories"
-              >
-                <DotsIcon /><span className="text-sm">Categories</span>
-              </button>
-              <div className="hidden sm:flex items-center gap-1 mr-2 select-text">
-                <span className="px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-sm cursor-default" aria-label="Current balance">
+            <div className="flex items-center gap-3 sm:gap-2">
+              <div className="sm:hidden mr-1 select-text">
+                <span className="px-2.5 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-xs font-medium cursor-default" aria-label="Current balance">
                   {balanceText}
                 </span>
               </div>
-              <div className="relative ml-1">
+              <div className="relative sm:ml-1">
                 <button onClick={() => setOpenProfile(v => !v)} aria-haspopup="menu" aria-label="Profile menu" aria-expanded={openProfile} className="block">
                   <Avatar imgUrl={user?.profile_photo_url} initials={initials} />
                 </button>
@@ -476,6 +582,19 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
                   </MenuCard>
                 )}
               </div>
+              <button
+                type="button"
+                className="sm:hidden inline-flex h-9 w-9 items-center justify-center rounded-lg bg-white/5 hover:bg-white/10 transition"
+                onClick={() => { setDrawerOpen(true); setOpenProfile(false); }}
+                aria-label="Open categories"
+              >
+                <HamburgerIcon />
+              </button>
+              <div className="hidden sm:flex items-center gap-1 mr-2 select-text">
+                <span className="px-3 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-400/25 text-emerald-100 text-sm cursor-default" aria-label="Current balance">
+                  {balanceText}
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -484,7 +603,7 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
       {/* Tabs */}
       <div className="relative z-10 bg-[#0b1b2b]/85 backdrop-blur supports-[backdrop-filter]:backdrop-blur-md border-y border-white/5">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="hidden sm:flex items-center gap-2 overflow-x-auto no-scrollbar py-2">
+          <div className="hidden sm:flex items-center gap-2 overflow-x-auto no-scrollbar touch-momentum py-2">
             {providerTabs.map(cat => (
               <button
                 key={cat}
@@ -505,12 +624,12 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
       {drawerOpen && (
         <div className="fixed inset-0 z-50 sm:hidden">
           <div className="absolute inset-0 bg-black/50" onClick={() => setDrawerOpen(false)} />
-          <div className="absolute bottom-0 inset-x-0 rounded-t-2xl bg-[#0c1e31] border-t border-white/10 p-4 max-h=[70vh]">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="font-semibold">Categories</h3>
+          <div className="absolute inset-y-0 right-0 w-[18.5rem] max-w-[85vw] bg-[#0c1e31] border-l border-white/10 shadow-2xl p-5 overflow-y-auto touch-momentum">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="font-semibold text-base">Categories</h3>
               <button className="p-2 rounded-lg hover:bg-white/10" onClick={() => setDrawerOpen(false)} aria-label="Close drawer"><XIcon /></button>
             </div>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="flex flex-col gap-2">
               {providerTabs.map(cat => (
                 <button
                   key={cat}
@@ -595,7 +714,13 @@ function SectionCarousel({ title, items, onPlay, rightNode = null }) {
   const scrollBy = (dir) => {
     const el = scrollerRef.current; if (!el) return;
     const delta = Math.round(el.clientWidth * 0.9) * (dir === 'left' ? -1 : 1);
-    el.scrollBy({ left: delta, behavior: 'smooth' });
+    if (supportsNativeSmoothScroll) {
+      try {
+        el.scrollBy({ left: delta, behavior: 'smooth' });
+        return;
+      } catch {}
+    }
+    el.scrollLeft += delta;
   };
 
   return (
@@ -610,8 +735,12 @@ function SectionCarousel({ title, items, onPlay, rightNode = null }) {
           onClick={() => scrollBy('left')}
           aria-label="Scroll left"
         ><ArrowLeftIcon /></button>
-        <div ref={scrollerRef} className="flex gap-3 overflow-x-auto no-scrollbar snap-x snap-mandatory scroll-smooth pr-1">
-          {items.map((g) => <GameCard key={gameReactKey(g)} game={g} onPlay={openGameProxy(onPlay)} variant="carousel" />)}
+        <div
+          ref={scrollerRef}
+          className="flex gap-3 overflow-x-auto no-scrollbar touch-momentum snap-x snap-mandatory scroll-smooth pr-1"
+          style={isIOSDevice ? { WebkitOverflowScrolling: 'touch' } : undefined}
+        >
+          {items.map((g) => <GameCard key={gameReactKey(g)} game={g} onPlay={onPlay} variant="carousel" />)}
         </div>
         <button
           className={`hidden md:grid place-items-center absolute -right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-white/10 border border-white/15 hover:bg-white/20 transition ${canR ? 'opacity-100' : 'opacity-0 pointer-events-none'} md:group-hover:opacity-100`}
@@ -623,63 +752,111 @@ function SectionCarousel({ title, items, onPlay, rightNode = null }) {
   );
 }
 
-/* --------------------------- Virtualized Grid --------------------------- */
+/* --------------------------- Category Grid --------------------------- */
 function SectionGridVirtualized({ title, items, onPlay, rightNode = null }) {
-  const [wrapRef, rect] = useMeasure();
-  const { h: winH } = useWindowSize();
-  const cols = useMemo(() => {
-    const w = rect.width || 0;
-    if (w >= 1280) return 6;
-    if (w >= 768)  return 4;
-    if (w >= 640)  return 3;
-    return 2;
-  }, [rect.width]);
-  const gap = 12;
-  const cellW = Math.max(100, Math.floor((rect.width - (cols - 1) * gap) / cols));
-  const cellH = Math.round(cellW * 9 / 16);
-  const rowH  = cellH;
-  const rows = Math.ceil(items.length / cols);
-  const rowHeight = rowH + gap;
-  const listHeight = rows > 0 ? Math.min(winH * 0.9, rows * rowHeight) : rowHeight;
-  const rowProps = useMemo(() => ({}), []);
-  const Row = useCallback(({ index, style, ariaAttributes = {} }) => {
-    const start = index * cols;
-    const rowItems = items.slice(start, start + cols);
-    return (
-      <div style={{ ...style, paddingBottom: `${gap}px` }} {...ariaAttributes}>
-        <div className="grid" style={{ display:'grid', gridTemplateColumns:`repeat(${cols}, minmax(0, 1fr))`, gap:`${gap}px` }}>
-          {rowItems.map((g) => (
-            <GameCard key={gameReactKey(g)} game={g} onPlay={openGameProxy(onPlay)} variant="grid" heightPx={cellH} />
-          ))}
-          {rowItems.length < cols && Array.from({ length: cols - rowItems.length }).map((_, i) => <div key={`ph-${i}`} />)}
-        </div>
-      </div>
-    );
-  }, [cols, items, gap, cellH, onPlay]);
+  const [visibleCount, setVisibleCount] = useState(CATEGORY_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(CATEGORY_PAGE_SIZE);
+  }, [items]);
+
+  const displayItems = useMemo(
+    () => items.slice(0, visibleCount),
+    [items, visibleCount]
+  );
+  const hasMore = items.length > visibleCount;
+  const handleShowMore = useCallback(() => {
+    setVisibleCount((prev) => Math.min(prev + CATEGORY_PAGE_SIZE, items.length));
+  }, [items.length]);
+
+  usePrefetchImages(displayItems, {
+    initialCount: Math.min(displayItems.length || 0, 64),
+    onlyIOS: false,
+  });
+
   return (
-    <section aria-label={title} ref={wrapRef} className="island">
+    <section aria-label={title} className="island">
       <div className="flex items-center justify-between mb-3 gap-3">
         <h2 className="text-lg sm:text-xl font-semibold truncate">{title}</h2>
         {rightNode}
       </div>
-      <div className="rounded-xl border border-white/10" style={{ height: listHeight, minHeight: rowHeight }}>
-        <List
-          className="no-scrollbar"
-          style={{ height: '100%', width: '100%' }}
-          rowComponent={Row}
-          rowCount={rows}
-          rowHeight={rowHeight}
-          rowProps={rowProps}
-          overscanCount={1}
-          defaultHeight={rowHeight}
-        />
+      <div className="rounded-xl border border-white/10 p-3 sm:p-4">
+        {displayItems.length === 0 ? (
+          <div className="text-white/60 text-sm">Keine Spiele gefunden.</div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
+            {displayItems.map((g) => (
+              <GameCard key={gameReactKey(g)} game={g} onPlay={onPlay} variant="grid" />
+            ))}
+          </div>
+        )}
       </div>
+      {hasMore && (
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            onClick={handleShowMore}
+            className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-sm font-semibold hover:bg-white/10 transition"
+          >
+            Show more
+          </button>
+        </div>
+      )}
     </section>
   );
 }
 
+const SearchInput = memo(function SearchInput({ value, onChange, placeholder }) {
+  const inputRef = useRef(null);
+  const hadFocusRef = useRef(false);
+  const ensureFocus = useCallback(() => {
+    if (!hadFocusRef.current || !hasDocument) return;
+    const node = inputRef.current;
+    if (!node || document.activeElement === node) return;
+    node.focus({ preventScroll: true });
+    try {
+      const len = node.value.length;
+      node.setSelectionRange(len, len);
+    } catch {}
+  }, []);
+
+  useLayoutEffect(() => {
+    ensureFocus();
+  }, [ensureFocus, value]);
+
+  const handleFocus = useCallback(() => {
+    hadFocusRef.current = true;
+  }, []);
+
+  const handleBlur = useCallback(() => {
+    hadFocusRef.current = false;
+  }, []);
+
+  const handleChange = useCallback((e) => {
+    hadFocusRef.current = true;
+    onChange(e.target.value);
+  }, [onChange]);
+
+  return (
+    <div className="w-full sm:w-72">
+      <div className="relative">
+        <input
+          ref={inputRef}
+          type="search"
+          value={value}
+          onChange={handleChange}
+          placeholder={placeholder}
+          onFocus={handleFocus}
+          onBlur={handleBlur}
+          autoComplete="off"
+          className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 pr-9 text-sm placeholder-white/50 outline-none focus:border-cyan-400/40"
+        />
+        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-white/60" aria-hidden="true"><SearchIcon /></span>
+      </div>
+    </div>
+  );
+});
+
 /* --------------------------- Game Card --------------------------- */
-function openGameProxy(onPlay) { return (id, opt) => onPlay?.(id, opt); }
 function gameReactKey(g) {
   const p = String(g?.provider || '').toLowerCase();
   if (g?.uid) return `uid:${g.uid}`;
@@ -691,19 +868,24 @@ function gameReactKey(g) {
   if (name) return `name:${p}#${name}`;
   return `${p}-${Math.random().toString(36).slice(2)}`;
 }
-function GameCard({ game, onPlay, variant = 'carousel', heightPx }) {
+const GameCard = memo(function GameCard({ game, onPlay, variant = 'carousel', heightPx }) {
   const title = game.name || `Game ${game.id}`;
   const provider = game.provider || 'Provider';
   const img = game.img || TRANSPARENT_PX;
   const containerCls = variant === 'grid'
     ? 'w-full'
     : 'snap-start flex-shrink-0 basis-1/2 sm:basis-1/2 md:basis-1/4 xl:basis-1/6';
-  const styleAspect = variant === 'grid' && heightPx ? { height: `${heightPx}px` } : undefined;
+  const cardStyle = variant === 'grid' && heightPx
+    ? { height: `${heightPx}px`, backgroundColor: '#10263b', willChange: 'transform' }
+    : { aspectRatio: '16 / 9', backgroundColor: '#10263b', willChange: 'transform' };
+  const handlePlay = useCallback(() => {
+    onPlay?.(game.id, { demo: false });
+  }, [onPlay, game.id]);
   return (
     <article className={containerCls} aria-label={title}>
       <div className="relative rounded-xl overflow-hidden group/card bg-[#0d2236] border border-white/10"
-           style={variant === 'grid' ? styleAspect : { aspectRatio: '16 / 9' }}>
-        <LazyImage src={img} alt={title} className="absolute inset-0 w-full h-full object-cover" />
+           style={cardStyle}>
+        <LazyImage src={img} alt={title} className="absolute inset-0 w-full h-full object-cover" style={{ backgroundColor: '#10263b' }} />
         <div className="absolute left-2 top-2 px-2 py-1 rounded-md bg-black/50 text-[10px] leading-none">{provider}</div>
         <div className="absolute inset-0 opacity-0 group-hover/card:opacity-100 transition-opacity">
           <div className="absolute inset-x-0 bottom-0 p-2 bg-gradient-to-t from-black/60 to-transparent">
@@ -713,7 +895,7 @@ function GameCard({ game, onPlay, variant = 'carousel', heightPx }) {
             <div className="flex gap-2">
               <button
                 className="px-3 py-1.5 rounded-lg bg-white text-black text-sm font-semibold hover:brightness-95"
-                onClick={() => onPlay?.(game.id, { demo: false })}
+                onClick={handlePlay}
               >
                 Play
               </button>
@@ -723,7 +905,12 @@ function GameCard({ game, onPlay, variant = 'carousel', heightPx }) {
       </div>
     </article>
   );
-}
+}, (prev, next) => (
+  prev.game === next.game &&
+  prev.onPlay === next.onPlay &&
+  prev.variant === next.variant &&
+  prev.heightPx === next.heightPx
+));
 
 /* ------------------------------ Footer ------------------------------ */
 function Footer() {
@@ -780,7 +967,7 @@ function PromoSVG() {
 }
 function ArrowLeftIcon()  { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M15 5l-7 7 7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>); }
 function ArrowRightIcon() { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M9 5l7 7-7 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>); }
-function DotsIcon()       { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="5" cy="12" r="2" fill="currentColor"/><circle cx="12" cy="12" r="2" fill="currentColor"/><circle cx="19" cy="12" r="2" fill="currentColor"/></svg>); }
+function HamburgerIcon()  { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>); }
 function XIcon()          { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
 function SearchIcon()     { return (<svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="11" cy="11" r="7" stroke="currentColor" strokeWidth="2"/><path d="M20 20l-3-3" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/></svg>); }
 function PayIcon({ label }) {
