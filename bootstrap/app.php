@@ -54,6 +54,9 @@ return Application::configure(basePath: dirname(__DIR__))
 
             // Falls du Inertia verwendest (laravel/breeze + inertia)
             \App\Http\Middleware\HandleInertiaRequests::class,
+
+            // Update last_seen_at timestamps for active users
+            \App\Http\Middleware\UpdateLastSeen::class,
         ]);
 
         /**

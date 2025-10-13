@@ -29,6 +29,8 @@ class User extends Authenticatable
         'balance' => 'decimal:2',
         'runner_daily_limit' => 'decimal:2',
         'runner_per_user_limit' => 'decimal:2',
+        'last_seen_at' => 'datetime',
+        'is_playing' => 'boolean',
     ];
     protected function avatarUrl(): Attribute
     {
@@ -45,4 +47,32 @@ class User extends Authenticatable
     }
     public function runner()      { return $this->belongsTo(User::class, 'runner_id'); }
     public function assignedUsers(){ return $this->hasMany(User::class, 'runner_id'); }
+    public function gameSessions()
+    {
+        return $this->hasMany(GameSession::class);
+    }
+    public function scopeWithPresence($query)
+    {
+        return $query->addSelect([
+            'last_seen_at',
+            'is_playing' => GameSession::selectRaw('1')
+                ->whereColumn('game_sessions.user_id', 'users.id')
+                ->whereIn('status', ['open', 'opening'])
+                ->whereNull('closed_at')
+                ->limit(1),
+        ]);
+    }
+    public function getPresenceStatusAttribute(): string
+    {
+        if ($this->is_playing) {
+            return 'playing';
+        }
+
+        $lastSeen = $this->last_seen_at;
+        if ($lastSeen && $lastSeen->gt(now()->subMinutes(2))) {
+            return 'lobby';
+        }
+
+        return 'offline';
+    }
 }

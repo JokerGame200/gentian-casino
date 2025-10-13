@@ -2,6 +2,7 @@
 
 namespace App\Http\Middleware;
 
+use App\Models\GameSession;
 use Illuminate\Http\Request;
 use Inertia\Middleware;
 use Illuminate\Support\Facades\Storage;
@@ -55,6 +56,16 @@ class HandleInertiaRequests extends Middleware
             if (!$role && !empty($roles)) {
                 $role = $roles[0];
             }
+
+            $hasOpenGame = GameSession::query()
+                ->where('user_id', $user->id)
+                ->whereIn('status', ['open', 'opening'])
+                ->whereNull('closed_at')
+                ->exists();
+
+            $activityCutoff = now()->subMinutes(2);
+            $isLobby = !$hasOpenGame && $user->last_seen_at && $user->last_seen_at->greaterThan($activityCutoff);
+            $presence = $hasOpenGame ? 'playing' : ($isLobby ? 'lobby' : 'offline');
         }
 
         $lowerRoles = array_map('strtolower', $roles);
@@ -120,6 +131,9 @@ class HandleInertiaRequests extends Middleware
             'roles'             => $roles,     // Spatie-Rollenliste
             'is_admin'          => $isAdmin,
             'is_runner'         => $isRunner,
+            'is_playing'        => $hasOpenGame ?? false,
+            'presence'          => $presence   ?? 'offline',
+            'last_seen_at'      => optional($user->last_seen_at)->toIso8601String(),
         ] : null;
 
         // Flash-Messages (+ Invite-URL) lazy (Closures)

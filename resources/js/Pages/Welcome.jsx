@@ -1030,7 +1030,11 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
               </div>
               <div className="relative sm:ml-1">
                 <button onClick={() => setOpenProfile(v => !v)} aria-haspopup="menu" aria-label="Profile menu" aria-expanded={openProfile} className="block">
-                  <Avatar imgUrl={user?.profile_photo_url} initials={initials} />
+                  <Avatar
+                    imgUrl={user?.profile_photo_url}
+                    initials={initials}
+                    status={user?.presence}
+                  />
                 </button>
                 {openProfile && (
                   <MenuCard align="right">
@@ -1097,12 +1101,45 @@ function Header({ user, initials, balanceText, selectedCat, setSelectedCat, prov
 }
 
 /* ------------------------------ Avatar / Menus ------------------------------ */
-function Avatar({ imgUrl, initials }) {
-  return imgUrl ? (
-    <img src={imgUrl} alt="" aria-label="Profile avatar" className="h-9 w-9 rounded-full object-cover ring-2 ring-white/10" loading="lazy" />
-  ) : (
-    <div aria-label="Profile avatar" className="h-9 w-9 rounded-full grid place-items-center bg-gradient-to-br from-cyan-400/80 to-emerald-400/80 text-black font-bold ring-2 ring-white/10">
-      {initials}
+function Avatar({ imgUrl, initials, status, size = 'md' }) {
+  const sizeConfig = size === 'sm'
+    ? { box: 'h-7 w-7', text: 'text-xs', indicator: 'h-2.5 w-2.5', offset: '-bottom-0.5 -right-0.5' }
+    : { box: 'h-9 w-9', text: 'text-sm', indicator: 'h-3 w-3', offset: '-bottom-0.5 -right-0.5' };
+
+  const indicatorClass = status === 'playing'
+    ? 'bg-emerald-400 shadow-[0_0_6px_rgba(16,185,129,0.6)]'
+    : status === 'lobby'
+      ? 'bg-amber-400 shadow-[0_0_6px_rgba(251,191,36,0.6)]'
+      : null;
+
+  const title =
+    status === 'playing' ? 'Gerade im Spiel' :
+    status === 'lobby' ? 'Gerade in der Lobby' :
+    undefined;
+
+  return (
+    <div className="relative inline-block" title={title}>
+      {imgUrl ? (
+        <img
+          src={imgUrl}
+          alt=""
+          aria-label="Profile avatar"
+          className={`${sizeConfig.box} rounded-full object-cover ring-2 ring-white/10`}
+          loading="lazy"
+        />
+      ) : (
+        <div
+          aria-label="Profile avatar"
+          className={`${sizeConfig.box} ${sizeConfig.text} rounded-full grid place-items-center bg-gradient-to-br from-cyan-400/80 to-emerald-400/80 text-black font-bold ring-2 ring-white/10`}
+        >
+          {initials}
+        </div>
+      )}
+      {indicatorClass && (
+        <span
+          className={`absolute ${sizeConfig.offset} ${sizeConfig.indicator} rounded-full border-2 border-[#0a1726] ${indicatorClass}`}
+        />
+      )}
     </div>
   );
 }

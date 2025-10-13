@@ -17,6 +17,8 @@ class AdminController extends Controller
      */
     public function index(Request $request)
     {
+        $activityCutoff = now()->subMinutes(2);
+
         // --- Users (mit Limits-Feldern fürs Admin-Panel) ---
         $users = User::query()
             ->with(['runner:id,username', 'roles:id,name'])
@@ -29,12 +31,17 @@ class AdminController extends Controller
                 'runner_id',
                 'runner_daily_limit',
                 'runner_per_user_limit',
+                'last_seen_at',
             ])
+            ->withPresence()
             ->orderByDesc('id')
             ->paginate(25)
-            ->through(function (User $u) {
+            ->through(function (User $u) use ($activityCutoff) {
                 // Rolle: Spatie zuerst, Fallback auf evtl. role-Spalte
                 $role = optional($u->roles->first())->name ?? ($u->role ?? 'User');
+                $isPlaying = (bool) $u->is_playing;
+                $isLobby = !$isPlaying && $u->last_seen_at && $u->last_seen_at->greaterThan($activityCutoff);
+                $presence = $isPlaying ? 'playing' : ($isLobby ? 'lobby' : 'offline');
 
                 return [
                     'id'                     => $u->id,
@@ -46,6 +53,9 @@ class AdminController extends Controller
                     'role'                   => $role,
                     'runner_daily_limit'     => (float) ($u->runner_daily_limit ?? 1000),
                     'runner_per_user_limit'  => (float) ($u->runner_per_user_limit ?? 500),
+                    'last_seen_at'           => optional($u->last_seen_at)->toIso8601String(),
+                    'is_playing'             => $isPlaying,
+                    'presence'               => $presence,
                 ];
             })
             ->withQueryString();
