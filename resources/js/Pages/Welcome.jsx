@@ -411,6 +411,45 @@ export default function Welcome() {
   const [games, setGames] = useState([]);
   const [loadingGames, setLoadingGames] = useState(true);
   const [gamesError, setGamesError] = useState('');
+  const [launchMessage, setLaunchMessage] = useState(null);
+  const launchMessageDelayRef = useRef(null);
+  const launchMessageHideRef = useRef(null);
+  const clearLaunchMessageTimers = useCallback(() => {
+    if (launchMessageDelayRef.current) {
+      clearTimeout(launchMessageDelayRef.current);
+      launchMessageDelayRef.current = null;
+    }
+    if (launchMessageHideRef.current) {
+      clearTimeout(launchMessageHideRef.current);
+      launchMessageHideRef.current = null;
+    }
+  }, []);
+  const dismissLaunchMessage = useCallback(() => {
+    clearLaunchMessageTimers();
+    setLaunchMessage(null);
+  }, [clearLaunchMessageTimers]);
+  const showLaunchMessage = useCallback((message, { delay = 0, duration = 9000 } = {}) => {
+    clearLaunchMessageTimers();
+    const reveal = () => {
+      setLaunchMessage(message);
+      if (duration > 0) {
+        launchMessageHideRef.current = setTimeout(() => {
+          dismissLaunchMessage();
+        }, duration);
+      }
+    };
+    if (delay > 0) {
+      launchMessageDelayRef.current = setTimeout(() => {
+        reveal();
+        launchMessageDelayRef.current = null;
+      }, delay);
+    } else {
+      reveal();
+    }
+  }, [clearLaunchMessageTimers, dismissLaunchMessage]);
+  useEffect(() => () => {
+    clearLaunchMessageTimers();
+  }, [clearLaunchMessageTimers]);
 
   useEffect(() => {
     let alive = true;
@@ -590,6 +629,7 @@ export default function Welcome() {
   const overlayRef = useRef(null);
   const iframeRef = useRef(null);
   const lastClosedSessionIdRef = useRef(null);
+  const openInFlightRef = useRef(false);
 
   const closeSession = useCallback((sessionId) => {
     if (!sessionId) return;
@@ -799,6 +839,11 @@ export default function Welcome() {
   }, [activeSessionId, closeSession]);
 
   const openGame = useCallback(async (gameId, options = {}) => {
+    if (openInFlightRef.current) {
+      return;
+    }
+    openInFlightRef.current = true;
+    dismissLaunchMessage();
     try {
       const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
       const res = await fetch('/api/games/open', {
@@ -828,9 +873,22 @@ export default function Welcome() {
         window.location.assign(data.url);
       }
     } catch (e) {
-      alert(e?.message || 'Unable to launch the game.');
+      const errorCode = e?.data?.error || e?.message || '';
+      if (e?.status === 423 || errorCode === 'active_game_in_progress') {
+        showLaunchMessage({
+          title: 'Another game is already running',
+          body: 'Please close your other game window before starting a new one. This keeps your sessions safe.',
+        }, { delay: 700 });
+      } else {
+        showLaunchMessage({
+          title: 'We couldn’t open the game',
+          body: 'Please refresh the page or try again in a moment.',
+        }, { delay: 300 });
+      }
+    } finally {
+      openInFlightRef.current = false;
     }
-  }, []);
+  }, [dismissLaunchMessage, showLaunchMessage, setOverlay]);
 
 
   const closeOverlayButton = useCallback(() => closeOverlay(), [closeOverlay]);
@@ -853,6 +911,27 @@ export default function Welcome() {
         className="min-h-screen bg-[#0a1726] text-white selection:bg-cyan-400/30"
         style={{ minHeight: 'var(--viewport-vh, 100vh)' }}
       >
+        {launchMessage && (
+          <div className="fixed top-6 left-1/2 z-[11000] w-full max-w-md -translate-x-1/2 px-4">
+            <div className="flex items-start gap-3 rounded-2xl border border-white/10 bg-[#102238]/95 px-5 py-4 shadow-xl backdrop-blur">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-cyan-400/15 text-cyan-200 text-lg font-semibold">
+                !
+              </div>
+              <div className="flex-1">
+                <p className="text-base font-semibold text-white/95">{launchMessage.title}</p>
+                <p className="mt-1 text-sm text-white/70">{launchMessage.body}</p>
+              </div>
+              <button
+                type="button"
+                onClick={dismissLaunchMessage}
+                className="ml-2 rounded-full p-1 text-white/60 transition hover:text-white focus:outline-none focus-visible:ring-2 focus-visible:ring-cyan-300/60"
+                aria-label="Close message"
+              >
+                ×
+              </button>
+            </div>
+          </div>
+        )}
         <Header
           user={user}
           initials={initials}
