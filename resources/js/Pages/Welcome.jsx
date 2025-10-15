@@ -272,14 +272,17 @@ function usePrefetchImages(games, options = {}) {
 }
 const buildKeyCandidates = (g) => {
   const idCands = [g?.uid, g?.uuid, g?.game_id, g?.sys_id, g?.id, g?.slug, g?.code, g?.key, g?.external_id].filter(v => v != null);
+  const idStrings = idCands
+    .map((v) => String(v).trim())
+    .filter((v) => v.length > 0);
   const nameN = normalizeName(getName(g));
   const provN = stableProvider(getProvider(g));
   const keys = [
-    ...idCands.map(v => `id:${String(v)}`),
+    ...idStrings.map(v => `id:${v}`),
     (provN && nameN) ? `provname:${provN}#${nameN}` : null,
     nameN ? `name:${nameN}` : null,
   ].filter(Boolean);
-  return { keys, nameN, provN };
+  return { keys, nameN, provN, ids: idStrings };
 };
 const hasBetterThumb = (a, b) => {
   const ia = String(a?.img || ''), ib = String(b?.img || '');
@@ -294,10 +297,11 @@ function normalizeAndDedupe(list) {
     const name = String(getName(raw) || '').trim();
     const provider = String(getProvider(raw) || '').trim();
     const img = pickImage(raw);
-    const { keys, nameN, provN } = buildKeyCandidates(raw);
+    const { keys, nameN, provN, ids } = buildKeyCandidates(raw);
     const nameLower = name.toLowerCase();
     const providerLower = provider.toLowerCase();
-    const searchText = [nameLower, providerLower, nameN, provN].filter(Boolean).join('|');
+    const idSearchTerms = Array.isArray(ids) ? ids.map((id) => id.toLowerCase()) : [];
+    const searchText = [nameLower, providerLower, nameN, provN, ...idSearchTerms].filter(Boolean).join('|');
     const norm = {
       ...raw,
       name,
@@ -307,6 +311,7 @@ function normalizeAndDedupe(list) {
       _provN: provN,
       _providerL: providerLower,
       _searchText: searchText,
+      _searchIds: idSearchTerms,
     };
 
     let bucketKey = null;
@@ -517,10 +522,16 @@ export default function Welcome() {
       });
     }
     if (s) {
-      out = out.filter(g => g?._searchText?.includes(s));
+      out = out.filter((g) => {
+        if (g?._searchText?.includes(s)) return true;
+        if (isAllTab && Array.isArray(g?._searchIds)) {
+          return g._searchIds.some((id) => id.includes(s));
+        }
+        return false;
+      });
     }
     return out;
-  }, [games, normalizedSelectedCat, dq]);
+  }, [games, normalizedSelectedCat, dq, isAllTab]);
   const collator = useMemo(() => new Intl.Collator(undefined, { sensitivity: 'base', numeric: true }), []);
   const alphabeticalGames = useMemo(() => {
     if (!Array.isArray(filteredGames) || filteredGames.length === 0) return filteredGames;
@@ -631,12 +642,24 @@ export default function Welcome() {
   const lastClosedSessionIdRef = useRef(null);
   const openInFlightRef = useRef(false);
 
+  const getCsrfToken = useCallback(() => {
+    if (!hasDocument) return '';
+    try {
+      return document.querySelector('meta[name="csrf-token"]')?.content || '';
+    } catch {
+      return '';
+    }
+  }, []);
+
   const closeSession = useCallback((sessionId) => {
     if (!sessionId) return;
     if (lastClosedSessionIdRef.current === sessionId) return;
     lastClosedSessionIdRef.current = sessionId;
 
-    const payload = JSON.stringify({ sessionId });
+    const csrf = getCsrfToken();
+    const payload = JSON.stringify(
+      csrf ? { sessionId, _token: csrf } : { sessionId }
+    );
     const url = '/api/games/close';
 
     if (hasNavigator && typeof navigator.sendBeacon === 'function' && typeof Blob !== 'undefined') {
@@ -649,19 +672,81 @@ export default function Welcome() {
     }
 
     if (hasWindow && typeof fetch === 'function') {
+      const headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+        'X-Requested-With': 'XMLHttpRequest',
+      };
+      if (csrf) {
+        headers['X-CSRF-TOKEN'] = csrf;
+      }
       fetch(url, {
         method: 'POST',
         credentials: 'include',
-        headers: {
-          'Content-Type': 'application/json',
-          'Accept': 'application/json',
-          'X-Requested-With': 'XMLHttpRequest',
-        },
+        headers,
         body: payload,
         keepalive: true,
       }).catch(() => {});
     }
-  }, []);
+  }, [getCsrfToken]);
+
+  const forceCloseSession = useCallback(async (sessionId) => {
+    if (!sessionId) return false;
+    const csrf = getCsrfToken();
+    const payload = JSON.stringify(
+      csrf ? { sessionId, _token: csrf } : { sessionId }
+    );
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+    };
+    if (csrf) {
+      headers['X-CSRF-TOKEN'] = csrf;
+    }
+
+    try {
+      const res = await fetch('/api/games/close', {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: payload,
+      });
+      if (res.ok) {
+        lastClosedSessionIdRef.current = sessionId;
+        return true;
+      }
+    } catch {
+      // ignore and fall through
+    }
+    return false;
+  }, [getCsrfToken]);
+
+  const pingSession = useCallback((sessionId) => {
+    if (!sessionId) return;
+    if (!hasWindow || typeof fetch !== 'function') return;
+
+    const csrf = getCsrfToken();
+    const payload = JSON.stringify(
+      csrf ? { sessionId, _token: csrf } : { sessionId }
+    );
+    const headers = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+      'X-Requested-With': 'XMLHttpRequest',
+    };
+    if (csrf) {
+      headers['X-CSRF-TOKEN'] = csrf;
+    }
+
+    fetch('/api/games/ping', {
+      method: 'POST',
+      credentials: 'include',
+      headers,
+      body: payload,
+      keepalive: true,
+    }).catch(() => {});
+  }, [getCsrfToken]);
 
   const closeOverlay = useCallback((options = {}) => {
     const { skipHistory = false } = options;
@@ -813,6 +898,25 @@ export default function Welcome() {
     };
   }, [closeOverlay]);
 
+  useEffect(() => {
+    const sessionId = overlay?.sessionId;
+    if (!sessionId || !hasWindow) return undefined;
+
+    let stopped = false;
+    const heartbeat = () => {
+      if (stopped) return;
+      pingSession(sessionId);
+    };
+
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 7000);
+
+    return () => {
+      stopped = true;
+      window.clearInterval(interval);
+    };
+  }, [overlay?.sessionId, pingSession]);
+
   const activeSessionId = overlay?.sessionId || null;
   useEffect(() => {
     if (!activeSessionId || !hasWindow) return undefined;
@@ -845,57 +949,123 @@ export default function Welcome() {
     openInFlightRef.current = true;
     dismissLaunchMessage();
     try {
-      const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-      const res = await fetch('/api/games/open', {
-        method: 'POST',
-        credentials: 'include',
-        headers: {
+      const attemptOpen = async () => {
+        const csrf = getCsrfToken();
+        const headers = {
           'Content-Type': 'application/json',
           'Accept': 'application/json',
           'X-Requested-With': 'XMLHttpRequest',
-          'X-CSRF-TOKEN': csrf,
-        },
-        body: JSON.stringify({ gameId, demo: !!options.demo }),
-      });
-      const data = await res.json();
-      if (data?.status !== 'success') throw new Error(data?.error || 'open_failed');
+        };
+        if (csrf) {
+          headers['X-CSRF-TOKEN'] = csrf;
+        }
 
-      const withoutFrame = String(data.withoutFrame ?? '0') === '1';
-      if (!withoutFrame) {
-        setOverlay({ url: data.url, sessionId: data.sessionId || null });
-        if (hasDocument) {
-          document.body.classList.add('body-game-open');
+        try {
+          const res = await fetch('/api/games/open', {
+            method: 'POST',
+            credentials: 'include',
+            headers,
+            body: JSON.stringify({ gameId, demo: !!options.demo }),
+          });
+          let data = null;
+          try {
+            data = await res.json();
+          } catch {
+            data = null;
+          }
+          const ok = res.ok && data?.status === 'success' && data?.url;
+          const errorCode = ok
+            ? null
+            : (data?.error || (res.status === 423 ? 'active_game_in_progress' : 'open_failed'));
+
+          return { ok, status: res.status, data, errorCode };
+        } catch {
+          return { ok: false, status: 0, data: null, errorCode: 'network_error' };
         }
-        if (hasWindow) {
-          try { history.pushState({ g: gameId }, '', window.location.href); } catch {}
+      };
+
+      const maxAttempts = 2;
+      let attempts = 0;
+      let result = null;
+
+      while (attempts < maxAttempts) {
+        result = await attemptOpen();
+        if (result.ok) {
+          const data = result.data;
+          const withoutFrame = String(data.withoutFrame ?? '0') === '1';
+          if (!withoutFrame) {
+            setOverlay({ url: data.url, sessionId: data.sessionId || null });
+            if (hasDocument) {
+              document.body.classList.add('body-game-open');
+            }
+            if (hasWindow) {
+              try { history.pushState({ g: gameId }, '', window.location.href); } catch {}
+            }
+          } else {
+            window.location.assign(data.url);
+          }
+          return;
         }
-      } else {
-        window.location.assign(data.url);
+
+        const sessionId = result?.data?.sessionId;
+        const confidence = result?.data?.confidence || 'unknown';
+        const retryable = (confidence === 'uncertain') || result?.data?.retry === true;
+
+        if (
+          result?.errorCode === 'active_game_in_progress' &&
+          retryable &&
+          sessionId &&
+          attempts < maxAttempts - 1
+        ) {
+          const closed = await forceCloseSession(sessionId);
+          if (closed) {
+            attempts += 1;
+            continue;
+          }
+        }
+        break;
       }
-    } catch (e) {
-      const errorCode = e?.data?.error || e?.message || '';
-      if (e?.status === 423 || errorCode === 'active_game_in_progress') {
+
+      const errorCode = result?.errorCode || 'open_failed';
+      if (errorCode === 'active_game_in_progress') {
+        const blockedGameId = result?.data?.gameId;
+        const blockedGameName = result?.data?.gameName;
+        const blockedLabel = blockedGameName
+          ? (blockedGameId ? `${blockedGameName} (${blockedGameId})` : blockedGameName)
+          : (blockedGameId ? `Game ${blockedGameId}` : null);
         showLaunchMessage({
           title: 'Another game is already running',
-          body: 'Please close your other game window before starting a new one. This keeps your sessions safe.',
+          body: blockedLabel
+            ? `${blockedLabel} is still open. Close it before launching a new one.`
+            : 'Please close your other game window before starting a new one.',
         }, { delay: 700 });
+      } else if (errorCode === 'network_error') {
+        showLaunchMessage({
+          title: 'Network issue',
+          body: 'Please check your connection and try opening the game again.',
+        }, { delay: 300 });
       } else {
         showLaunchMessage({
           title: 'We couldn’t open the game',
           body: 'Please refresh the page or try again in a moment.',
         }, { delay: 300 });
       }
+    } catch {
+      showLaunchMessage({
+        title: 'We couldn’t open the game',
+        body: 'Please refresh the page or try again in a moment.',
+      }, { delay: 300 });
     } finally {
       openInFlightRef.current = false;
     }
-  }, [dismissLaunchMessage, showLaunchMessage, setOverlay]);
+  }, [dismissLaunchMessage, showLaunchMessage, setOverlay, forceCloseSession, getCsrfToken]);
 
 
   const closeOverlayButton = useCallback(() => closeOverlay(), [closeOverlay]);
   const searchPlaceholder = isHomeTab
     ? 'Search games or providers…'
     : isAllTab
-      ? 'Search all games…'
+      ? 'Search all games or game IDs…'
       : `Search in ${prettySelectedCat || 'games'}…`;
 
   /* ------------------------------ Render ------------------------------ */

@@ -44,6 +44,64 @@ const PANEL_TEXT_CSS = `
   color: #ffffff !important;
 }
 `;
+const PANEL_SELECT_CSS = `
+.admin-panel .select-wrapper {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  width: 100%;
+}
+.admin-panel .select-wrapper:not(.select-wrapper--full) {
+  width: auto;
+}
+.admin-panel .select-wrapper::after {
+  content: '';
+  position: absolute;
+  right: 0.85rem;
+  width: 0.6rem;
+  height: 0.6rem;
+  border: 2px solid rgba(255, 255, 255, 0.7);
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg);
+  pointer-events: none;
+  transition: border-color 0.2s ease, transform 0.2s ease;
+}
+.admin-panel .select-wrapper:focus-within::after {
+  border-color: rgba(34, 211, 238, 0.9);
+  transform: rotate(45deg) translateY(-1px);
+}
+.admin-panel .app-select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  background-color: rgba(12, 27, 46, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0.75rem;
+  color: rgba(255, 255, 255, 0.9);
+  font-weight: 500;
+  line-height: 1.4;
+  padding: 0.55rem 2.5rem 0.55rem 0.9rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+  width: 100%;
+}
+.admin-panel .app-select:focus {
+  outline: none;
+  border-color: rgba(34, 211, 238, 0.7);
+  box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.18);
+  background-color: rgba(17, 40, 66, 0.95);
+}
+.admin-panel .app-select:hover {
+  background-color: rgba(17, 40, 66, 0.95);
+}
+.admin-panel .app-select option {
+  color: #ffffff;
+  background-color: #0b1626;
+}
+.admin-panel .app-select::-ms-expand {
+  display: none;
+}
+`;
 
 export default function AdminPanel({ users, runners = [], stats = {}, logs, gameLogs }) {
   const { props } = usePage();
@@ -91,7 +149,7 @@ export default function AdminPanel({ users, runners = [], stats = {}, logs, game
         {/* <link rel="icon" href="/img/play4cash-mark.svg?v=1" head-key="fav" /> */}
         {/* <link rel="alternate icon" type="image/png" sizes="32x32" href="/img/play4cash-32.png" /> */}
       </Head>
-      <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS + PANEL_TEXT_CSS }} />
+      <style dangerouslySetInnerHTML={{ __html: HIDE_SCROLLBAR_CSS + PANEL_TEXT_CSS + PANEL_SELECT_CSS }} />
       <div className="min-h-screen bg-[#0a1726] text-white admin-panel">
         <Header
           user={user}
@@ -101,9 +159,9 @@ export default function AdminPanel({ users, runners = [], stats = {}, logs, game
           setTab={setTab}
         />
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24">
+        <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pb-24">
           {/* KPIs */}
-          <section className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-4 mt-6">
+          <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4 mt-6">
             <KpiCard label="Users" value={kpis.users} />
             <KpiCard label="Dealers" value={kpis.runners} />
             <KpiCard label="Deposits (today)" value={formatCurrency(kpis.depositsToday, currency)} />
@@ -329,40 +387,53 @@ function UsersAdmin({ users, runners }) {
       )}
 
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
           <h2 className="text-lg font-semibold">Users</h2>
-          <input
-            value={q}
-            onChange={(e)=>setQ(e.target.value)}
-            placeholder="Search by ID, name, role…"
-            className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 outline-none focus:ring-2 focus:ring-cyan-400 w-56"
-          />
+          <div className="w-full sm:w-auto">
+            <input
+              value={q}
+              onChange={(e)=>setQ(e.target.value)}
+              placeholder="Search by ID, name, role…"
+              className="w-full sm:w-56 rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 outline-none focus:ring-2 focus:ring-cyan-400"
+            />
+          </div>
         </div>
 
-        <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
-          <table className="min-w-full text-sm">
-            <thead className="bg-white/5 text-white/80">
-              <tr>
-                <Th>ID</Th>
-                <Th>User</Th>
-                <Th>Role</Th>
-                <Th>Dealer</Th>
-                <Th className="text-right">Balance</Th>
-                <Th>Actions</Th>
-              </tr>
-            </thead>
-            <tbody>
+        {filtered.length > 0 ? (
+          <>
+            <div className="hidden lg:block">
+              <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
+                <table className="min-w-full text-xs sm:text-sm">
+                  <thead className="bg-white/5 text-white/80">
+                    <tr>
+                      <Th className="w-16">ID</Th>
+                      <Th>User</Th>
+                      <Th className="w-44">Role</Th>
+                      <Th className="w-48">Dealer</Th>
+                      <Th className="text-right w-28">Balance</Th>
+                      <Th className="w-60">Actions</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(u => (
+                      <UserRow key={u.id} user={u} runners={runners} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-4 lg:hidden">
               {filtered.map(u => (
-                <UserRow key={u.id} user={u} runners={runners} />
+                <UserRow key={u.id} user={u} runners={runners} variant="card" />
               ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={6} className="p-4 text-center text-white/60">No users found.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </>
+        ) : (
+          <div className="border border-white/10 rounded-xl bg-white/[0.04] p-6 text-center text-white/60">
+            No users found.
+          </div>
+        )}
 
         {users?.links && (
           <div className="flex gap-2 flex-wrap mt-3">
@@ -383,11 +454,12 @@ function UsersAdmin({ users, runners }) {
 }
 
 /* ---- UserRow ---- */
-function UserRow({ user, runners }) {
+function UserRow({ user, runners, variant = 'table' }) {
   const roleForm = useForm({ role: user.role ?? 'User' });
   const runnerForm = useForm({ runner_id: user.runner_id ?? '' });
   const balanceForm = useForm({ amount: '' });
   const initials = (user.username || user.name || 'U').slice(0,2).toUpperCase();
+  const roleLocked = String(user.role || '').toLowerCase() === 'admin';
 
   const postPromise = (form, action) => new Promise((resolve) => {
     form.post(action, { preserveScroll: true, onFinish: resolve });
@@ -395,7 +467,7 @@ function UserRow({ user, runners }) {
 
   const applyAll = async () => {
     // 1) Role change
-    if ((roleForm.data.role || 'User') !== (user.role || 'User')) {
+    if (!roleLocked && (roleForm.data.role || 'User') !== (user.role || 'User')) {
       const action = routeUrl('admin.setRole', (id)=>`/admin/users/${id}/role/set`, user.id);
       await postPromise(roleForm, action);
     }
@@ -432,6 +504,122 @@ function UserRow({ user, runners }) {
 
   const targetRole = roleForm.data.role || user.role || 'User';
   const runnerAssignAllowed = targetRole === 'User';
+  const balanceValue = Number(user.balance ?? 0).toFixed(2);
+  const amountError = balanceForm.errors.amount;
+  const renderAmountError = (extraClass = '') =>
+    amountError ? <div className={`text-rose-300 text-xs ${extraClass}`}>{amountError}</div> : null;
+
+  const selectWrapperClass = variant === 'card'
+    ? 'select-wrapper select-wrapper--full'
+    : 'select-wrapper';
+  const roleSelect = (
+    <>
+      <div className={selectWrapperClass}>
+        <select
+          value={roleForm.data.role}
+          onChange={(e)=>!roleLocked && roleForm.setData('role', e.target.value)}
+          className={`app-select ${variant === 'card' ? 'w-full' : 'min-w-[7.5rem]'}${roleLocked ? ' opacity-70 cursor-not-allowed' : ''}`}
+          disabled={roleLocked}
+        >
+          {roleForm.data.role === 'Admin' && <option value="Admin" disabled>Admin</option>}
+          <option value="User">User</option>
+          <option value="Runner">Dealer</option>
+        </select>
+      </div>
+      {roleLocked && <div className="text-xs text-white/50 mt-1">Admin role cannot be changed</div>}
+      {roleForm.errors.role && <div className="text-rose-300 text-xs mt-1">{roleForm.errors.role}</div>}
+    </>
+  );
+
+  const runnerControl = runnerAssignAllowed ? (
+    <>
+      <div className={selectWrapperClass}>
+        <select
+          value={runnerForm.data.runner_id || ''}
+          onChange={(e)=>runnerForm.setData('runner_id', e.target.value || '')}
+          className={`app-select ${variant === 'card' ? 'w-full' : 'min-w-[7.5rem]'}`}
+        >
+          <option value="">— none —</option>
+          {runners.map(r => <option key={r.id} value={r.id}>{r.username}</option>)}
+        </select>
+      </div>
+      {runnerForm.errors.runner_id && <div className="text-rose-300 text-xs mt-1">{runnerForm.errors.runner_id}</div>}
+    </>
+  ) : (
+    <span className="text-white/60 text-xs sm:text-sm">— not applicable —</span>
+  );
+
+  const amountInputClass = variant === 'card'
+    ? 'w-full rounded-lg bg-white/5 border border-white/10 px-2 py-1.5'
+    : 'w-24 xl:w-28 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5';
+  const applyButtonClass = variant === 'card'
+    ? 'w-full sm:w-auto px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60'
+    : 'px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60';
+  const deleteButtonClass = variant === 'card'
+    ? 'w-full sm:w-auto px-3 py-1.5 rounded-lg border border-rose-400 text-rose-300 hover:bg-rose-400/10 text-sm'
+    : 'px-2.5 py-1.5 rounded-lg border border-rose-400 text-rose-300 hover:bg-rose-400/10 text-sm';
+  const actionsWrapperClass = variant === 'card'
+    ? 'flex flex-col sm:flex-row gap-2'
+    : 'flex flex-wrap items-center gap-2';
+
+  if (variant === 'card') {
+    return (
+      <article className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 space-y-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <Avatar initials={initials} status={user.presence} />
+            <div className="min-w-0">
+              <div className="font-semibold truncate">{user.username || user.name || '—'}</div>
+              <div className="text-xs text-white/60 truncate">#{user.id}</div>
+            </div>
+          </div>
+          <span className="px-2 py-1 rounded-full border border-white/10 bg-white/5 text-xs text-white/70">
+            Balance {balanceValue}
+          </span>
+        </div>
+
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <div className="text-xs uppercase tracking-wide text-white/50">Role</div>
+            {roleSelect}
+          </div>
+          <div className="space-y-1">
+            <div className="text-xs uppercase tracking-wide text-white/50">Dealer</div>
+            {runnerControl}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="text-xs uppercase tracking-wide text-white/50">Adjust balance</div>
+          <div className={actionsWrapperClass}>
+            <input
+              type="number" step="0.01" placeholder="Amount"
+              value={balanceForm.data.amount}
+              onChange={(e)=>balanceForm.setData('amount', e.target.value)}
+              className={amountInputClass}
+              max="500"
+            />
+            <button
+              onClick={applyAll}
+              disabled={roleForm.processing || runnerForm.processing || balanceForm.processing}
+              className={applyButtonClass}
+              title="Apply all changes"
+            >
+              Apply changes
+            </button>
+            <button
+              onClick={deleteUser}
+              disabled={deleting}
+              className={deleteButtonClass}
+            >
+              {deleting ? 'Deleting…' : 'Delete'}
+            </button>
+          </div>
+          {renderAmountError('mt-1')}
+        </div>
+      </article>
+    );
+  }
 
   return (
     <tr className="border-t border-white/10">
@@ -447,49 +635,32 @@ function UserRow({ user, runners }) {
       </Td>
 
       <Td>
-        <select
-          value={roleForm.data.role}
-          onChange={(e)=>roleForm.setData('role', e.target.value)}
-          className="rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
-        >
-          <option value="User">User</option>
-          <option value="Runner">Dealer</option>
-          <option value="Admin">Admin</option>
-        </select>
-        {roleForm.errors.role && <div className="text-rose-300 text-xs mt-1">{roleForm.errors.role}</div>}
+        <div className="space-y-1">
+          {roleSelect}
+        </div>
       </Td>
 
       <Td>
-        {runnerAssignAllowed ? (
-          <select
-            value={runnerForm.data.runner_id || ''}
-            onChange={(e)=>runnerForm.setData('runner_id', e.target.value || '')}
-            className="rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
-          >
-            <option value="">— none —</option>
-            {runners.map(r => <option key={r.id} value={r.id}>{r.username}</option>)}
-          </select>
-        ) : (
-          <span className="text-white/50">— not applicable —</span>
-        )}
-        {runnerForm.errors.runner_id && <div className="text-rose-300 text-xs mt-1">{runnerForm.errors.runner_id}</div>}
+        <div className="space-y-1">
+          {runnerControl}
+        </div>
       </Td>
 
-      <Td className="text-right font-mono">{Number(user.balance ?? 0).toFixed(2)}</Td>
+      <Td className="text-right font-mono">{balanceValue}</Td>
 
       <Td>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className={actionsWrapperClass}>
           <input
             type="number" step="0.01" placeholder="Amount"
             value={balanceForm.data.amount}
             onChange={(e)=>balanceForm.setData('amount', e.target.value)}
-            className="w-28 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
+            className={amountInputClass}
             max="500" /* UI cap; server enforces real limits */
           />
           <button
             onClick={applyAll}
             disabled={roleForm.processing || runnerForm.processing || balanceForm.processing}
-            className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60"
+            className={applyButtonClass}
             title="Apply all changes"
           >
             Apply
@@ -497,11 +668,12 @@ function UserRow({ user, runners }) {
           <button
             onClick={deleteUser}
             disabled={deleting}
-            className="px-2.5 py-1.5 rounded-lg border border-rose-400 text-rose-300 hover:bg-rose-400/10 text-sm"
+            className={deleteButtonClass}
           >
             {deleting ? 'Deleting…' : 'Delete'}
           </button>
         </div>
+        {renderAmountError('mt-1')}
       </Td>
     </tr>
   );
@@ -531,68 +703,89 @@ function LogsAdmin({ logs }) {
       return fu.toLowerCase().includes(s) || tu.toLowerCase().includes(s);
     });
   }, [items, q]);
+  const normalizedLogs = useMemo(() => {
+    return filtered.map((row) => {
+      const id = row.id ?? `${row.created_at}-${row.to_user_id}-${row.from_user_id}`;
+      const fromUser = row?.from_user ?? row?.fromUser ?? {};
+      const toUser = row?.to_user ?? row?.toUser ?? {};
+      const amount = Number(row?.amount ?? 0);
+      const dt = row?.created_at ? new Date(row.created_at) : null;
+      return {
+        id,
+        timestamp: dt ? dt.toLocaleString() : '-',
+        fromName: fromUser?.username ?? `#${row?.from_user_id ?? '-'}`,
+        toName: toUser?.username ?? `#${row?.to_user_id ?? '-'}`,
+        amount,
+      };
+    });
+  }, [filtered]);
 
   return (
     <section className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold">Dealer Logs</h2>
-        <div className="flex items-center gap-2">
+        <div className="w-full sm:w-auto flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             type="search"
             placeholder="Filter: user…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
+            className="w-full sm:w-56 rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
           />
           <button
             onClick={() => router.reload({ only: ['logs'], preserveState: true, preserveScroll: true })}
-            className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10"
+            className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 w-full sm:w-auto"
           >
             Refresh
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
-        <table className="min-w-full text-sm">
-          <thead className="bg-white/5 text-white/80">
-            <tr>
-              <Th className="w-48">Time</Th>
-              <Th>From</Th>
-              <Th>To</Th>
-              <Th className="text-right w-32">Amount</Th>
-            </tr>
-          </thead>
-        <tbody>
-          {filtered.map((row) => {
-            const id = row.id ?? `${row.created_at}-${row.to_user_id}-${row.from_user_id}`;
-            const fromUser = row?.from_user ?? row?.fromUser ?? {};
-            const toUser = row?.to_user ?? row?.toUser ?? {};
-            const amount = Number(row?.amount ?? 0);
-            const isPlus = amount >= 0;
-            const dt = row?.created_at ? new Date(row.created_at) : null;
-            const when = dt ? dt.toLocaleString() : '-';
-            return (
-              <tr key={id} className="border-t border-white/10">
-                <Td className="whitespace-nowrap">{when}</Td>
-                <Td>{fromUser?.username ?? `#${row?.from_user_id ?? '-'}`}</Td>
-                <Td>{toUser?.username ?? `#${row?.to_user_id ?? '-'}`}</Td>
-                <Td className="text-right font-mono">
-                  <span className={isPlus ? "text-emerald-300" : "text-rose-300"}>
-                    {isPlus ? "+" : ""}{amount.toFixed(2)}
-                  </span>
-                </Td>
-              </tr>
-            );
-          })}
-          {filtered.length === 0 && (
-            <tr>
-              <td colSpan={4} className="p-4 text-center text-white/60">No records found.</td>
-            </tr>
-          )}
-        </tbody>
-        </table>
-      </div>
+      {normalizedLogs.length > 0 ? (
+        <>
+          <div className="hidden lg:block">
+            <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
+              <table className="min-w-full text-xs sm:text-sm">
+                <thead className="bg-white/5 text-white/80">
+                  <tr>
+                    <Th className="w-48">Time</Th>
+                    <Th>From</Th>
+                    <Th>To</Th>
+                    <Th className="text-right w-28">Amount</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {normalizedLogs.map((log) => {
+                    const isPlus = log.amount >= 0;
+                    return (
+                      <tr key={log.id} className="border-t border-white/10">
+                        <Td className="whitespace-nowrap">{log.timestamp}</Td>
+                        <Td>{log.fromName}</Td>
+                        <Td>{log.toName}</Td>
+                        <Td className="text-right font-mono">
+                          <span className={isPlus ? "text-emerald-300" : "text-rose-300"}>
+                            {isPlus ? "+" : ""}{log.amount.toFixed(2)}
+                          </span>
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="space-y-3 lg:hidden">
+            {normalizedLogs.map((log) => (
+              <DealerLogCard key={log.id} log={log} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="border border-white/10 rounded-xl bg-white/[0.04] p-4 text-center text-white/60">
+          No records found.
+        </div>
+      )}
 
       {/* Pagination, wenn als Paginator geliefert */}
       {Array.isArray(logs?.links) && logs.links.length > 0 && (
@@ -609,6 +802,40 @@ function LogsAdmin({ logs }) {
         </div>
       )}
     </section>
+  );
+}
+
+function DealerLogCard({ log }) {
+  const amountPositive = log.amount >= 0;
+  return (
+    <article className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 space-y-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-white/50">Time</div>
+          <div className="font-mono">{log.timestamp}</div>
+        </div>
+        <span
+          className={`px-3 py-1 rounded-lg border text-sm font-mono ${
+            amountPositive
+              ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+              : 'border-rose-400/30 bg-rose-500/10 text-rose-200'
+          }`}
+        >
+          {amountPositive ? '+' : ''}
+          {log.amount.toFixed(2)}
+        </span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-white/50">From</div>
+          <div className="mt-1 font-semibold text-white truncate">{log.fromName}</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-white/50">To</div>
+          <div className="mt-1 font-semibold text-white truncate">{log.toName}</div>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -636,85 +863,106 @@ function GameLogsAdmin({ gameLogs }) {
       return gameName.includes(term) || provider.includes(term) || gameId.includes(term);
     });
   }, [items, q]);
+  const normalizedGames = useMemo(() => {
+    return filtered.map((row, idx) => {
+      const totalBet = Number(row?.total_bet ?? 0);
+      const totalWin = Number(row?.total_win ?? 0);
+      const playerResult = Number(row?.player_result ?? (totalWin - totalBet));
+      const dealerProfit = Number(row?.house_result ?? (totalBet - totalWin));
+      return {
+        id: row?.game_id ?? row?.game_name ?? `game-${idx}`,
+        name: row?.game_name ?? row?.game_id ?? '—',
+        gameId: row?.game_id ?? 'n/a',
+        provider: row?.provider ?? '—',
+        rounds: Number(row?.rounds_count ?? 0),
+        totalBet,
+        totalWin,
+        playerResult,
+        dealerProfit,
+      };
+    });
+  }, [filtered]);
 
   return (
     <section className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold">Game Logs</h2>
-        <div className="flex items-center gap-2">
+        <div className="w-full sm:w-auto flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             type="search"
             placeholder="Filter: game or provider…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
+            className="w-full sm:w-64 rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
           />
           <button
             onClick={() => router.reload({ only: ['gameLogs'], preserveState: true, preserveScroll: true })}
-            className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10"
+            className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 w-full sm:w-auto"
           >
             Refresh
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
-        <table className="min-w-full text-sm">
-          <thead className="bg-white/5 text-white/80">
-            <tr>
-              <Th>Game</Th>
-              <Th>Provider</Th>
-              <Th className="text-right w-24">Rounds</Th>
-              <Th className="text-right w-32">Bet amount</Th>
-              <Th className="text-right w-32">Win</Th>
-              <Th className="text-right w-32">Player Result</Th>
-              <Th className="text-right w-32">Dealer Profit</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((row, idx) => {
-              const key = row?.game_id ?? row?.game_name ?? `game-${idx}`;
-              const totalBet = Number(row?.total_bet ?? 0);
-              const totalWin = Number(row?.total_win ?? 0);
-              const playerResult = Number(row?.player_result ?? (totalWin - totalBet));
-              const houseResult = Number(row?.house_result ?? (totalBet - totalWin));
-              const rounds = Number(row?.rounds_count ?? 0);
+      {normalizedGames.length > 0 ? (
+        <>
+          <div className="hidden lg:block">
+            <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
+              <table className="min-w-full text-xs sm:text-sm">
+                <thead className="bg-white/5 text-white/80">
+                  <tr>
+                    <Th>Game</Th>
+                    <Th>Provider</Th>
+                    <Th className="text-right w-24">Rounds</Th>
+                    <Th className="text-right w-28">Bet</Th>
+                    <Th className="text-right w-28">Win</Th>
+                    <Th className="text-right w-32">Player Result</Th>
+                    <Th className="text-right w-32">Dealer Profit</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {normalizedGames.map((row) => (
+                    <tr key={row.id} className="border-t border-white/10">
+                      <Td>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{row.name}</span>
+                          <span className="text-xs text-white/60">#{row.gameId}</span>
+                        </div>
+                      </Td>
+                      <Td>{row.provider}</Td>
+                      <Td className="text-right font-mono">{row.rounds.toLocaleString()}</Td>
+                      <Td className="text-right font-mono">{row.totalBet.toFixed(2)}</Td>
+                      <Td className="text-right font-mono">{row.totalWin.toFixed(2)}</Td>
+                      <Td className="text-right font-mono">
+                        <span className={row.playerResult >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                          {row.playerResult >= 0 ? '+' : ''}
+                          {row.playerResult.toFixed(2)}
+                        </span>
+                      </Td>
+                      <Td className="text-right font-mono">
+                        <span className={row.dealerProfit >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                          {row.dealerProfit >= 0 ? '+' : ''}
+                          {row.dealerProfit.toFixed(2)}
+                        </span>
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
 
-              return (
-                <tr key={key} className="border-t border-white/10">
-                  <Td>
-                    <div className="flex flex-col">
-                      <span className="font-medium">{row?.game_name ?? row?.game_id ?? '—'}</span>
-                      <span className="text-xs text-white/60">#{row?.game_id ?? 'n/a'}</span>
-                    </div>
-                  </Td>
-                  <Td>{row?.provider ?? '—'}</Td>
-                  <Td className="text-right font-mono">{rounds.toLocaleString()}</Td>
-                  <Td className="text-right font-mono">{totalBet.toFixed(2)}</Td>
-                  <Td className="text-right font-mono">{totalWin.toFixed(2)}</Td>
-                  <Td className="text-right font-mono">
-                    <span className={playerResult >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
-                      {playerResult >= 0 ? '+' : ''}
-                      {playerResult.toFixed(2)}
-                    </span>
-                  </Td>
-                  <Td className="text-right font-mono">
-                    <span className={houseResult >= 0 ? 'text-emerald-300' : 'text-rose-300'}>
-                      {houseResult >= 0 ? '+' : ''}
-                      {houseResult.toFixed(2)}
-                    </span>
-                  </Td>
-                </tr>
-              );
-            })}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={7} className="p-4 text-center text-white/60">No records found.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          <div className="space-y-3 lg:hidden">
+            {normalizedGames.map((row) => (
+              <GameLogCard key={row.id} log={row} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="border border-white/10 rounded-xl bg-white/[0.04] p-4 text-center text-white/60">
+          No records found.
+        </div>
+      )}
 
       {Array.isArray(gameLogs?.links) && gameLogs.links.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -730,6 +978,34 @@ function GameLogsAdmin({ gameLogs }) {
         </div>
       )}
     </section>
+  );
+}
+
+function GameLogCard({ log }) {
+  const resultTone = log.playerResult >= 0 ? 'text-emerald-300' : 'text-rose-300';
+  const profitTone = log.dealerProfit >= 0 ? 'text-emerald-300' : 'text-rose-300';
+
+  const renderStat = (label, value, tone) => (
+    <div key={label} className="rounded-xl bg-white/[0.05] border border-white/10 p-3">
+      <div className="text-xs uppercase tracking-wide text-white/50">{label}</div>
+      <div className={`mt-1 font-mono ${tone ?? 'text-white'}`}>{value}</div>
+    </div>
+  );
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 space-y-3 text-sm">
+      <div>
+        <div className="font-semibold text-white truncate">{log.name}</div>
+        <div className="text-xs text-white/60 truncate">#{log.gameId} · {log.provider}</div>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        {renderStat('Rounds', log.rounds.toLocaleString())}
+        {renderStat('Bet total', log.totalBet.toFixed(2))}
+        {renderStat('Win total', log.totalWin.toFixed(2))}
+        {renderStat('Player result', `${log.playerResult >= 0 ? '+' : ''}${log.playerResult.toFixed(2)}`, resultTone)}
+      </div>
+      {renderStat('Dealer profit', `${log.dealerProfit >= 0 ? '+' : ''}${log.dealerProfit.toFixed(2)}`, profitTone)}
+    </article>
   );
 }
 
@@ -778,29 +1054,33 @@ function InviteForm({ runners }) {
       <h3 className="font-semibold">Create Invite</h3>
       <label className="block text-sm">
         <span className="text-white/80">Type</span>
-        <select
-          name="role"
-          value={form.data.role}
-          onChange={(e)=>form.setData('role', e.target.value)}
-          className="mt-1 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2"
-        >
-          <option value="User">User</option>
-          <option value="Runner">Dealer</option>
-        </select>
+        <div className="select-wrapper select-wrapper--full mt-1">
+          <select
+            name="role"
+            value={form.data.role}
+            onChange={(e)=>form.setData('role', e.target.value)}
+            className="app-select"
+          >
+            <option value="User">User</option>
+            <option value="Runner">Dealer</option>
+          </select>
+        </div>
       </label>
 
       {form.data.role === 'User' && (
         <label className="block text-sm">
           <span className="text-white/80">Assign Dealer (optional)</span>
-          <select
-            name="runner_id"
-            value={form.data.runner_id || ''}
-            onChange={(e)=>form.setData('runner_id', e.target.value || '')}
-            className="mt-1 w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2"
-          >
-            <option value="">— none —</option>
-            {runners.map(r => <option key={r.id} value={r.id}>{r.username}</option>)}
-          </select>
+          <div className="select-wrapper select-wrapper--full mt-1">
+            <select
+              name="runner_id"
+              value={form.data.runner_id || ''}
+              onChange={(e)=>form.setData('runner_id', e.target.value || '')}
+              className="app-select"
+            >
+              <option value="">— none —</option>
+              {runners.map(r => <option key={r.id} value={r.id}>{r.username}</option>)}
+            </select>
+          </div>
         </label>
       )}
 
@@ -830,59 +1110,72 @@ function RunnerSettingsAdmin({ runners }) {
 
   return (
     <section className="space-y-6">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
         <h2 className="text-lg font-semibold">Dealer Settings</h2>
-        <input
-          value={q}
-          onChange={(e)=>setQ(e.target.value)}
-          placeholder="Search runner by ID or name…"
-          className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 outline-none focus:ring-2 focus:ring-cyan-400 w-64"
-        />
+        <div className="w-full sm:w-auto">
+          <input
+            value={q}
+            onChange={(e)=>setQ(e.target.value)}
+            placeholder="Search runner by ID or name…"
+            className="w-full sm:w-64 rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 outline-none focus:ring-2 focus:ring-cyan-400"
+          />
+        </div>
       </div>
 
-      <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
-        <table className="min-w-full text-sm">
-          <thead className="bg-white/5 text-white/80">
-            <tr>
-              <Th className="w-20">ID</Th>
-              <Th>Dealer</Th>
-              <Th>Current Limits</Th>
-              <Th>Update</Th>
-            </tr>
-          </thead>
-          <tbody>
+      {filtered.length > 0 ? (
+        <>
+          <div className="hidden lg:block">
+            <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
+              <table className="min-w-full text-xs sm:text-sm">
+                <thead className="bg-white/5 text-white/80">
+                  <tr>
+                    <Th className="w-20">ID</Th>
+                    <Th>Dealer</Th>
+                    <Th>Current Limits</Th>
+                    <Th>Update</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map(r => (
+                    <tr key={r.id} className="border-t border-white/10">
+                      <Td>{r.id}</Td>
+                      <Td>
+                        <div className="flex items-center gap-2">
+                          <div className="h-7 w-7 rounded-full bg-white/10 grid place-items-center text-xs">
+                            {(r.username || r.name || 'R').slice(0,2).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="font-medium truncate">{r.username || r.name || '—'}</div>
+                            <div className="text-xs text-white/60 truncate">#{r.id}</div>
+                          </div>
+                        </div>
+                      </Td>
+                      <Td className="font-mono text-white/80">
+                        Daily: {Number(r.runner_daily_limit ?? 0).toFixed(2)} €
+                        <span className="text-white/40"> · </span>
+                        Per-User/Tag: {Number(r.runner_per_user_limit ?? 0).toFixed(2)} €
+                      </Td>
+                      <Td>
+                        <RunnerLimitsForm user={r} />
+                      </Td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 lg:hidden">
             {filtered.map(r => (
-              <tr key={r.id} className="border-t border-white/10">
-                <Td>{r.id}</Td>
-                <Td>
-                  <div className="flex items-center gap-2">
-                    <div className="h-7 w-7 rounded-full bg-white/10 grid place-items-center text-xs">
-                      {(r.username || r.name || 'R').slice(0,2).toUpperCase()}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">{r.username || r.name || '—'}</div>
-                      <div className="text-xs text-white/60 truncate">#{r.id}</div>
-                    </div>
-                  </div>
-                </Td>
-                <Td className="font-mono text-white/80">
-                  Daily: {Number(r.runner_daily_limit ?? 0).toFixed(2)} €
-                  <span className="text-white/40"> · </span>
-                  Per-User/Tag: {Number(r.runner_per_user_limit ?? 0).toFixed(2)} €
-                </Td>
-                <Td>
-                  <RunnerLimitsForm user={r} />
-                </Td>
-              </tr>
+              <RunnerSettingsCard key={r.id} runner={r} />
             ))}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={4} className="p-4 text-center text-white/60">No runners found.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </div>
+        </>
+      ) : (
+        <div className="border border-white/10 rounded-xl bg-white/[0.04] p-6 text-center text-white/60">
+          No runners found.
+        </div>
+      )}
     </section>
   );
 }
@@ -914,7 +1207,7 @@ function RunnerLimitsForm({ user }) {
           type="number" min="0" step="0.01"
           value={form.data.runner_daily_limit}
           onChange={(e)=>form.setData('runner_daily_limit', e.target.value)}
-          className="w-28 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
+          className="w-full lg:w-28 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
         />
       </div>
       <div className="flex flex-col">
@@ -923,13 +1216,13 @@ function RunnerLimitsForm({ user }) {
           type="number" min="0" step="0.01"
           value={form.data.runner_per_user_limit}
           onChange={(e)=>form.setData('runner_per_user_limit', e.target.value)}
-          className="w-32 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
+          className="w-full lg:w-32 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
         />
       </div>
       <button
         onClick={save}
         disabled={form.processing}
-        className="px-3 py-1.5 rounded-lg bg-cyan-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60"
+        className="w-full lg:w-auto px-3 py-1.5 rounded-lg bg-cyan-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60"
       >
         Save Limits
       </button>
@@ -947,12 +1240,47 @@ function RunnerLimitsForm({ user }) {
   );
 }
 
+function RunnerSettingsCard({ runner }) {
+  const initials = (runner.username || runner.name || 'R').slice(0, 2).toUpperCase();
+  const daily = Number(runner.runner_daily_limit ?? 0).toFixed(2);
+  const perUser = Number(runner.runner_per_user_limit ?? 0).toFixed(2);
+
+  return (
+    <article className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 space-y-4">
+      <div className="flex items-center gap-3">
+        <div className="h-10 w-10 rounded-full bg-white/10 grid place-items-center font-semibold">
+          {initials}
+        </div>
+        <div className="min-w-0">
+          <div className="font-semibold truncate text-sm">
+            {runner.username || runner.name || '—'}
+          </div>
+          <div className="text-xs text-white/60 truncate">#{runner.id}</div>
+        </div>
+      </div>
+
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm text-white/80">
+        <div className="rounded-xl bg-white/[0.05] border border-white/10 p-3">
+          <dt className="text-xs uppercase tracking-wide text-white/50">Daily limit</dt>
+          <dd className="mt-1 font-mono">{daily} €</dd>
+        </div>
+        <div className="rounded-xl bg-white/[0.05] border border-white/10 p-3">
+          <dt className="text-xs uppercase tracking-wide text-white/50">Per user / tag</dt>
+          <dd className="mt-1 font-mono">{perUser} €</dd>
+        </div>
+      </dl>
+
+      <RunnerLimitsForm user={runner} />
+    </article>
+  );
+}
+
 /* ------- Shared UI bits ------- */
 function KpiCard({ label, value }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-[#0f1f33] to-[#0b1626] p-5">
-      <div className="text-sm text-white/70">{label}</div>
-      <div className="mt-1 text-2xl font-extrabold tracking-tight">{value}</div>
+    <div className="rounded-2xl border border-white/10 bg-gradient-to-b from-[#0f1f33] to-[#0b1626] p-4 sm:p-5">
+      <div className="text-xs sm:text-sm text-white/70">{label}</div>
+      <div className="mt-1 text-xl sm:text-2xl font-extrabold tracking-tight">{value}</div>
     </div>
   );
 }
@@ -972,8 +1300,20 @@ function Alert({ tone='info', children }) {
   };
   return <div className={`rounded-xl border px-3 py-2 ${map[tone]}`}>{children}</div>;
 }
-function Th({ children, className='' }) { return <th className={`text-left p-2 font-semibold text-white ${className}`}>{children}</th>; }
-function Td({ children, className='' }) { return <td className={`p-2 align-middle text-white/80 ${className}`}>{children}</td>; }
+function Th({ children, className='' }) {
+  return (
+    <th className={`text-left px-2 py-2 font-semibold text-white text-xs sm:text-sm ${className}`}>
+      {children}
+    </th>
+  );
+}
+function Td({ children, className='' }) {
+  return (
+    <td className={`px-2 py-1.5 align-middle text-white/80 text-xs sm:text-sm ${className}`}>
+      {children}
+    </td>
+  );
+}
 
 /* ------- Avatar / MenuCard / MenuItem wie in Welcome.jsx ------- */
 function Avatar({ imgUrl, initials, status, size = 'md' }) {

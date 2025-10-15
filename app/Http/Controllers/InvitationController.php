@@ -43,7 +43,7 @@ class InvitationController extends Controller
         }
 
         $data = $request->validate([
-            'username' => 'required|string|min:3|max:30|unique:users,username',
+            'username' => 'required|string|min:5|max:30|unique:users,username',
             'password' => 'required|string|min:8|confirmed',
         ]);
 

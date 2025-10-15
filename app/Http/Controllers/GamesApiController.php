@@ -10,9 +10,9 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Http\Client\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
+use App\Support\GamesCatalog;
 
 class GamesApiController extends Controller
 {
@@ -24,10 +24,12 @@ class GamesApiController extends Controller
     {
         try {
             // img-Parameter defensiv behandeln
-            $imgStyle = $request->query('img', 'game_img_2');
-            $allowedImgs = ['game_img_1', 'game_img_2'];
+            $imgStyle = (string) $request->query('img', 'game_img_2');
+            $allowedImgs = GamesCatalog::ALLOWED_IMG_STYLES;
             if (!in_array($imgStyle, $allowedImgs, true)) {
-                $imgStyle = 'game_img_2';
+                $imgStyle = in_array('game_img_2', $allowedImgs, true)
+                    ? 'game_img_2'
+                    : $allowedImgs[0];
             }
 
             $payload = [
@@ -60,7 +62,7 @@ class GamesApiController extends Controller
             }
 
             // Sichere JSON-Dekodierung (wirft keine 500)
-            $data = $this->decodeJsonSafe($resp);
+            $data = GamesCatalog::decodeJsonSafe($resp);
             if (!$data || ($data['status'] ?? null) !== 'success') {
                 Log::warning('GAMES list upstream logical/format fail', [
                     'err'  => $data['error'] ?? 'upstream_invalid_json_or_fail',
@@ -77,25 +79,8 @@ class GamesApiController extends Controller
                 $content = [];
             }
 
-            $flat = [];
-            foreach ($content as $providerTitle => $games) {
-                if (!is_iterable($games)) continue;
-                foreach ($games as $g) {
-                    $flat[] = [
-                        'id'         => (string)($g['id'] ?? ''),
-                        'name'       => $g['name'] ?? '',
-                        'img'        => $g['img'] ?? null,
-                        'device'     => (int)($g['device'] ?? 2),
-                        'provider'   => $g['title'] ?? (is_string($providerTitle) ? $providerTitle : ''),
-                        'categories' => $g['categories'] ?? '',
-                        'demo'       => (int)($g['demo'] ?? 0),
-                        'rewriterule'=> (int)($g['rewriterule'] ?? 0),
-                        'exitButton' => (int)($g['exitButton'] ?? 0),
-                    ];
-                }
-            }
-
-            $flat = $this->dedupeGames($flat);
+            $flat = GamesCatalog::flattenContent($content);
+            $flat = GamesCatalog::dedupe($flat);
             usort($flat, fn($a,$b) => [$a['provider'],$a['name']] <=> [$b['provider'],$b['name']]);
 
             return response()->json([
@@ -113,191 +98,6 @@ class GamesApiController extends Controller
                 'error'  => 'server_exception',
             ], 500);
         }
-    }
-
-    /**
-     * Entfernt doppelte Spiele und bevorzugt Einträge mit besseren Assets.
-     */
-    private function dedupeGames(array $games): array
-    {
-        $buckets = [];
-        $aliases = [];
-
-        foreach ($games as $raw) {
-            $game = $this->normalizeGame($raw);
-
-            $candidates = [];
-            if ($game['id'] !== '') {
-                $candidates[] = 'id:' . $game['id'];
-            }
-            if ($game['_provider_norm'] !== '' && $game['_name_norm'] !== '') {
-                $candidates[] = 'provname:' . $game['_provider_norm'] . '#' . $game['_name_norm'];
-            }
-            if ($game['_name_norm'] !== '') {
-                $candidates[] = 'name:' . $game['_name_norm'];
-            }
-            if ($game['_img_key'] !== '') {
-                $candidates[] = 'img:' . $game['_img_key'];
-            }
-
-            if (!$candidates) {
-                $candidates[] = 'hash:' . md5(
-                    ($game['name'] ?? '') . '|' .
-                    ($game['provider'] ?? '') . '|' .
-                    ($game['img'] ?? '')
-                );
-            }
-
-            $bucketKey = null;
-            foreach ($candidates as $candidateKey) {
-                if (isset($aliases[$candidateKey])) {
-                    $bucketKey = $aliases[$candidateKey];
-                    break;
-                }
-            }
-
-            if (!$bucketKey) {
-                $bucketKey = $candidates[0];
-            }
-
-            $current = $buckets[$bucketKey] ?? null;
-            if (!$current || $this->preferCandidateOverCurrent($current, $game)) {
-                $buckets[$bucketKey] = $game;
-            }
-
-            foreach ($candidates as $candidateKey) {
-                $aliases[$candidateKey] = $bucketKey;
-            }
-        }
-
-        return array_values(array_map(function (array $game) {
-            unset($game['_name_norm'], $game['_provider_norm'], $game['_img_key']);
-            return $game;
-        }, $buckets));
-    }
-
-    private function normalizeGame(array $game): array
-    {
-        $id = trim((string)($game['id'] ?? ''));
-        $name = trim(preg_replace('/\s+/u', ' ', (string)($game['name'] ?? '')));
-        $provider = trim(preg_replace('/\s+/u', ' ', (string)($game['provider'] ?? '')));
-        $img = $this->sanitizeImage($game['img'] ?? null);
-
-        $nameNorm = $this->normalizeNamePart($name);
-        $providerNorm = $this->normalizeProvider($provider);
-        $imgKey = $this->normalizeImageKey($img);
-
-        return [
-            ...$game,
-            'id' => $id,
-            'name' => $name !== '' ? $name : ($game['name'] ?? ''),
-            'provider' => $provider,
-            'img' => $img,
-            '_name_norm' => $nameNorm,
-            '_provider_norm' => $providerNorm,
-            '_img_key' => $imgKey,
-        ];
-    }
-
-    private function normalizeNamePart(?string $value): string
-    {
-        return (string) Str::of((string) ($value ?? ''))
-            ->lower()
-            ->replaceMatches('/[™®©]/u', '')
-            ->replaceMatches('/\b(deluxe|classic|cash\s*link|dx|hd|xxl|gold|megaways|mega\s*ways)\b/u', '')
-            ->replaceMatches('/[-_.:\/\\\\]+/u', ' ')
-            ->replaceMatches('/\s+/u', ' ')
-            ->trim();
-    }
-
-    private function normalizeProvider(?string $value): string
-    {
-        return (string) Str::of((string) ($value ?? ''))
-            ->lower()
-            ->replaceMatches('/[^a-z0-9]+/u', ' ')
-            ->replaceMatches('/\s+/u', ' ')
-            ->trim();
-    }
-
-    private function preferCandidateOverCurrent(array $current, array $candidate): bool
-    {
-        $currentHasId = $current['id'] !== '';
-        $candidateHasId = $candidate['id'] !== '';
-        if ($candidateHasId !== $currentHasId) {
-            return $candidateHasId;
-        }
-
-        $currentHasProvider = $current['provider'] !== '';
-        $candidateHasProvider = $candidate['provider'] !== '';
-        if ($candidateHasProvider !== $currentHasProvider) {
-            return $candidateHasProvider;
-        }
-
-        $currentScore = $this->imageScore($current['img'] ?? null);
-        $candidateScore = $this->imageScore($candidate['img'] ?? null);
-        if ($candidateScore !== $currentScore) {
-            return $candidateScore > $currentScore;
-        }
-
-        $currentNameLen = strlen((string) ($current['name'] ?? ''));
-        $candidateNameLen = strlen((string) ($candidate['name'] ?? ''));
-        if ($candidateNameLen !== $currentNameLen) {
-            return $candidateNameLen > $currentNameLen;
-        }
-
-        $currentLen = strlen(json_encode($current));
-        $candidateLen = strlen(json_encode($candidate));
-        return $candidateLen > $currentLen;
-    }
-
-    private function imageScore(?string $url): int
-    {
-        $u = trim((string) ($url ?? ''));
-
-        if ($u === '' || in_array(strtolower($u), ['null', 'undefined', 'na'], true)) {
-            return 0;
-        }
-
-        if (Str::startsWith($u, 'data:')) {
-            return strlen($u) >= 80 ? 2 : 1;
-        }
-
-        if (Str::startsWith($u, ['http://', 'https://'])) {
-            return 5;
-        }
-
-        if (Str::startsWith($u, '//')) {
-            return 4;
-        }
-
-        return 3;
-    }
-
-    private function sanitizeImage($value): string
-    {
-        $img = trim((string) ($value ?? ''));
-        if ($img === '' || in_array(strtolower($img), ['null', 'undefined', 'na'], true)) {
-            return '';
-        }
-        return $img;
-    }
-
-    private function normalizeImageKey(?string $img): string
-    {
-        $img = trim((string) ($img ?? ''));
-        if ($img === '') {
-            return '';
-        }
-
-        if (Str::startsWith($img, ['http://', 'https://'])) {
-            return (string) Str::of($img)
-                ->lower()
-                ->before('#')
-                ->before('?')
-                ->trim('/');
-        }
-
-        return ltrim($img, '/');
     }
 
     /**
@@ -320,7 +120,8 @@ class GamesApiController extends Controller
             }
 
             $gameId = (string) $request->input('gameId');
-            $login  = 'u' . (string) $user->id;
+            $loginCandidate = trim((string) ($user->username ?? ''));
+            $login = $loginCandidate !== '' ? $loginCandidate : ('u' . (string) $user->id);
 
             $maxActiveSessions = (int) config('gamesapi.max_active_sessions_per_user', 2);
             if ($maxActiveSessions <= 0) {
@@ -340,7 +141,7 @@ class GamesApiController extends Controller
                 $now = Carbon::now();
                 $staleOpeningBefore = $now->copy()->subMinutes(3);
                 $staleHardBefore = $now->copy()->subMinutes((int) config('gamesapi.stale_session_minutes', 30));
-                $active = [];
+                $definitelyActive = [];
 
                 foreach ($activeSessions as $candidate) {
                     if ($candidate->status === 'opening'
@@ -367,23 +168,27 @@ class GamesApiController extends Controller
                         continue;
                     }
 
-                    $active[] = $candidate;
+                    $lastActivity = $candidate->updated_at
+                        ?? $candidate->opened_at
+                        ?? $candidate->created_at;
+
+                    $definitelyActive[] = $candidate;
                 }
 
-                if ($maxActiveSessions !== null && count($active) >= $maxActiveSessions) {
+                if ($maxActiveSessions !== null && count($definitelyActive) >= $maxActiveSessions) {
                     /** @var GameSession $blocked */
-                    $blocked = $active[0];
+                    $blocked = $definitelyActive[0];
                     Log::info('GAMES open blocked by active session', [
                         'user_id'    => $user->id,
                         'session_id' => $blocked->session_id,
                         'status'     => $blocked->status,
                         'updated_at' => $blocked->updated_at,
-                        'active_cnt' => count($active),
+                        'active_cnt' => count($definitelyActive),
                         'limit'      => $maxActiveSessions,
                     ]);
                     return [
                         'blocked'      => $blocked,
-                        'active_count' => count($active),
+                        'active_count' => count($definitelyActive),
                         'limit'        => $maxActiveSessions,
                     ];
                 }
@@ -400,7 +205,7 @@ class GamesApiController extends Controller
 
                 return [
                     'session'      => $session,
-                    'active_count' => count($active),
+                    'active_count' => count($definitelyActive),
                     'limit'        => $maxActiveSessions,
                 ];
             });
@@ -408,10 +213,13 @@ class GamesApiController extends Controller
             if (isset($guardResult['blocked'])) {
                 /** @var GameSession $active */
                 $active = $guardResult['blocked'];
+                $activeGameName = $this->lookupGameName($active->game_id);
                 Log::notice('GAMES open denied: active session exists', [
                     'user_id'    => $user->id,
                     'session_id' => $active->session_id,
                     'status'     => $active->status,
+                    'game_id'    => $active->game_id,
+                    'game_name'  => $activeGameName,
                     'active_cnt' => $guardResult['active_count'] ?? null,
                     'limit'      => $guardResult['limit'] ?? null,
                 ]);
@@ -419,6 +227,9 @@ class GamesApiController extends Controller
                     'status'    => 'fail',
                     'error'     => 'active_game_in_progress',
                     'sessionId' => $active->session_id,
+                    'gameId'    => $active->game_id,
+                    'gameName'  => $activeGameName,
+                    'confidence'=> 'definite',
                 ], 423);
             }
 
@@ -462,7 +273,7 @@ class GamesApiController extends Controller
                 ], 502);
             }
 
-            $data = $this->decodeJsonSafe($resp);
+            $data = GamesCatalog::decodeJsonSafe($resp);
             if (!$data || ($data['status'] ?? null) !== 'success') {
                 Log::warning('GAMES open upstream logical/format fail', [
                     'err' => $data['error'] ?? 'upstream_invalid_json_or_fail',
@@ -607,6 +418,107 @@ class GamesApiController extends Controller
         }
 
         return redirect()->route('welcome');
+    }
+
+    public function ping(Request $request)
+    {
+        $request->validate([
+            'sessionId' => ['required', 'string', 'max:255'],
+        ]);
+
+        $user = $request->user();
+        if (!$user) {
+            return response()->json([
+                'status' => 'fail',
+                'error'  => 'auth_required',
+            ], 401);
+        }
+
+        $sessionId = $this->normalizeString($request->input('sessionId'));
+        if (!$sessionId) {
+            return response()->json([
+                'status' => 'fail',
+                'error'  => 'invalid_session_id',
+            ], 422);
+        }
+
+        try {
+            $wasActive = DB::transaction(function () use ($user, $sessionId) {
+                $session = GameSession::where('user_id', $user->id)
+                    ->whereIn('status', ['open', 'opening'])
+                    ->where('session_id', $sessionId)
+                    ->lockForUpdate()
+                    ->first();
+
+                if (!$session) {
+                    return false;
+                }
+
+                $now = Carbon::now();
+                if (!$session->opened_at) {
+                    $session->opened_at = $now;
+                }
+                if ($session->status === 'opening') {
+                    $session->status = 'open';
+                }
+
+                $session->updated_at = $now;
+                $session->save();
+
+                return true;
+            });
+
+            return response()->json([
+                'status'     => 'success',
+                'sessionId'  => $sessionId,
+                'was_active' => $wasActive,
+            ]);
+        } catch (\Throwable $e) {
+            Log::error('GAMES ping fail', [
+                'msg'        => $e->getMessage(),
+                'session_id' => $sessionId,
+                'user_id'    => $user->id,
+            ]);
+
+            return response()->json([
+                'status' => 'fail',
+                'error'  => 'server_error',
+            ], 500);
+        }
+    }
+
+    private function lookupGameName(?string $gameIdentifier): ?string
+    {
+        $id = trim((string) ($gameIdentifier ?? ''));
+        if ($id === '') {
+            return null;
+        }
+
+        try {
+            $row = DB::table('games')
+                ->where(function ($query) use ($id) {
+                    $query->where('id', $id)
+                        ->orWhere('game_id', $id)
+                        ->orWhere('uid', $id);
+                })
+                ->select(['name', 'title', 'display_name'])
+                ->first();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        if (!$row) {
+            return null;
+        }
+
+        $data = (array) $row;
+        foreach (['name', 'title', 'display_name'] as $key) {
+            if (!empty($data[$key])) {
+                return (string) $data[$key];
+            }
+        }
+
+        return null;
     }
 
     private function closeUserSessions(?User $user, ?string $sessionId): int
@@ -1070,22 +982,4 @@ class GamesApiController extends Controller
         return null;
     }
 
-    /**
-     * Sichere JSON-Dekodierung mit Logging, ohne Exception nach außen.
-     */
-    private function decodeJsonSafe(Response $resp): ?array
-    {
-        $body = $resp->body();
-        try {
-            $data = json_decode($body ?? '', true, 512, JSON_THROW_ON_ERROR);
-            return is_array($data) ? $data : null;
-        } catch (\Throwable $e) {
-            Log::warning('GAMES upstream invalid JSON', [
-                'err'  => $e->getMessage(),
-                'len'  => strlen($body ?? ''),
-                'head' => substr($body ?? '', 0, 1000),
-            ]);
-            return null;
-        }
-    }
 }

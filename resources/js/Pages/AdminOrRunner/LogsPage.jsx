@@ -26,23 +26,23 @@ export default function LogsPage({ logs }) {
 
   return (
     <div className="space-y-6 text-white">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold">
           Dealer Logs {isAdmin ? "(Admin)" : isRunner ? "(Dealer)" : ""}
         </h1>
-        <div className="flex items-center gap-2">
+        <div className="w-full sm:w-auto flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             type="search"
             placeholder="Filter: user..."
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="rounded bg-white/5 border border-white/15 px-3 py-1 text-sm text-white placeholder-white/50 outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400/60"
+            className="w-full sm:w-56 rounded bg-white/5 border border-white/15 px-3 py-1.5 text-sm text-white placeholder-white/50 outline-none focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400/60"
           />
           <button
             onClick={() =>
               router.reload({ only: ["logs"], preserveState: true, preserveScroll: true })
             }
-            className="text-sm px-3 py-1 border border-white/15 rounded bg-white/5 hover:bg-white/10 transition-colors"
+            className="text-sm px-3 py-1.5 border border-white/15 rounded bg-white/5 hover:bg-white/10 transition-colors w-full sm:w-auto"
           >
             Refresh
           </button>
@@ -50,13 +50,13 @@ export default function LogsPage({ logs }) {
       </div>
 
       <div className="overflow-x-auto border border-white/10 rounded-xl">
-        <table className="min-w-full text-sm">
+        <table className="min-w-full text-xs sm:text-sm">
           <thead className="bg-white/10 text-white/80">
             <tr>
-              <th className="text-left p-2 font-semibold w-48">Time</th>
-              <th className="text-left p-2 font-semibold">From</th>
-              <th className="text-left p-2 font-semibold">To</th>
-              <th className="text-right p-2 font-semibold w-32">Amount</th>
+              <th className="text-left px-2 py-2 font-semibold w-48">Time</th>
+              <th className="text-left px-2 py-2 font-semibold">From</th>
+              <th className="text-left px-2 py-2 font-semibold">To</th>
+              <th className="text-right px-2 py-2 font-semibold w-32">Amount</th>
             </tr>
           </thead>
           <tbody className="bg-white/5">
@@ -71,10 +71,10 @@ export default function LogsPage({ logs }) {
 
               return (
                 <tr key={id} className="border-t border-white/10">
-                  <td className="p-2 whitespace-nowrap text-white/80">{when}</td>
-                  <td className="p-2 text-white/80">{fromUser?.username ?? `#${row?.from_user_id ?? "-"}`}</td>
-                  <td className="p-2 text-white/80">{toUser?.username ?? `#${row?.to_user_id ?? "-"}`}</td>
-                  <td className="p-2 text-right font-mono">
+                  <td className="px-2 py-1.5 whitespace-nowrap text-white/80">{when}</td>
+                  <td className="px-2 py-1.5 text-white/80">{fromUser?.username ?? `#${row?.from_user_id ?? "-"}`}</td>
+                  <td className="px-2 py-1.5 text-white/80">{toUser?.username ?? `#${row?.to_user_id ?? "-"}`}</td>
+                  <td className="px-2 py-1.5 text-right font-mono">
                     <span className={isPlus ? "text-emerald-300" : "text-rose-300"}>
                       {isPlus ? "+" : ""}
                       {amount.toFixed(2)}

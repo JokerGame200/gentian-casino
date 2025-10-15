@@ -85,6 +85,8 @@ export default function RegisterByInvite({ token }) {
                   name="username"
                   value={data.username}
                   autoComplete="username"
+                  minLength={5}
+                  required
                   onChange={(e) => setData('username', e.target.value)}
                   className="w-full rounded-lg bg-white/5 border border-white/10 px-3 py-2 outline-none focus:ring-2 focus:ring-cyan-400"
                 />

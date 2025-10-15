@@ -44,6 +44,7 @@ Route::middleware('auth')->group(function () {
     Route::get('/api/games/list',  [GamesApiController::class, 'list'])->name('api.games.list');
     Route::post('/api/games/open', [GamesApiController::class, 'open'])->name('api.games.open');
     Route::post('/api/games/close',[GamesApiController::class, 'close'])->name('api.games.close');
+    Route::post('/api/games/ping', [GamesApiController::class, 'ping'])->name('api.games.ping');
 
     // Breeze Profile
     Route::get('/profile',  [ProfileController::class, 'edit'])->name('profile.edit');

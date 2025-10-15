@@ -84,7 +84,7 @@ export default function RunnerUsersPage({ users, logs, assigned_user_ids = [] })
           setTab={setTab}
         />
 
-        <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-24">
+        <main className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 pb-24">
           <div className="mt-8">
             {tab === 'Users' && <UsersRunner users={users} currency={currency} me={me} />}
             {tab === 'Logs'  && <LogsRunner logs={logs} users={users} assignedIds={assigned_user_ids} />}
@@ -293,38 +293,51 @@ function UsersRunner({ users }) {
       )}
 
       <div>
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-3">
           <h2 className="text-lg font-semibold">Users</h2>
-          <input
-            value={q}
-            onChange={(e)=>setQ(e.target.value)}
-            placeholder="Search by ID or name…"
-            className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 outline-none focus:ring-2 focus:ring-cyan-400 w-56"
-          />
+          <div className="w-full sm:w-auto">
+            <input
+              value={q}
+              onChange={(e)=>setQ(e.target.value)}
+              placeholder="Search by ID or name…"
+              className="w-full sm:w-56 rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 outline-none focus:ring-2 focus:ring-cyan-400"
+            />
+          </div>
         </div>
 
-        <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
-          <table className="min-w-full text-sm">
-            <thead className="bg-white/5 text-white/80">
-              <tr>
-                <Th>ID</Th>
-                <Th>User</Th>
-                <Th className="text-right">Balance</Th>
-                <Th>Action</Th>
-              </tr>
-            </thead>
-            <tbody>
+        {filtered.length > 0 ? (
+          <>
+            <div className="hidden lg:block">
+              <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
+                <table className="min-w-full text-xs sm:text-sm">
+                  <thead className="bg-white/5 text-white/80">
+                    <tr>
+                      <Th>ID</Th>
+                      <Th>User</Th>
+                      <Th className="text-right">Balance</Th>
+                      <Th>Action</Th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map(u => (
+                      <UserRowRunner key={u.id} user={u} />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="space-y-4 lg:hidden">
               {filtered.map(u => (
-                <UserRowRunner key={u.id} user={u} />
+                <UserRowRunner key={u.id} user={u} variant="card" />
               ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="p-4 text-center text-white/60">No users assigned yet.</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            </div>
+          </>
+        ) : (
+          <div className="border border-white/10 rounded-xl bg-white/[0.04] p-6 text-center text-white/60">
+            No users assigned yet.
+          </div>
+        )}
 
         {users?.links && (
           <div className="flex gap-2 flex-wrap mt-3">
@@ -344,7 +357,7 @@ function UsersRunner({ users }) {
   );
 }
 
-function UserRowRunner({ user }) {
+function UserRowRunner({ user, variant = 'table' }) {
   const form = useForm({ amount: '' });
   const initials = (user.username || user.name || 'U').slice(0,2).toUpperCase();
 
@@ -357,6 +370,56 @@ function UserRowRunner({ user }) {
       onFinish: () => form.setData('amount',''),
     });
   };
+
+  const inputClasses = variant === 'card'
+    ? "w-full rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
+    : "w-24 lg:w-32 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5";
+  const buttonClasses = variant === 'card'
+    ? "w-full lg:w-auto px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60"
+    : "px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60";
+  const renderError = (extraClass = '') =>
+    form.errors.amount ? <div className={`text-rose-300 text-xs ${extraClass}`}>{form.errors.amount}</div> : null;
+
+  if (variant === 'card') {
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 space-y-4">
+        <div className="flex items-center gap-3">
+          <Avatar initials={initials} status={user.presence} />
+          <div className="min-w-0">
+            <div className="font-semibold truncate">{user.username || user.name || '—'}</div>
+            <div className="text-xs text-white/60 truncate">#{user.id}</div>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="col-span-2 sm:col-span-1 rounded-xl bg-white/[0.05] border border-white/10 p-3">
+            <div className="text-xs uppercase tracking-wide text-white/50">Balance</div>
+            <div className="mt-1 text-lg font-mono text-white">{Number(user.balance ?? 0).toFixed(2)}</div>
+          </div>
+          <div className="col-span-2 sm:col-span-1 flex flex-col gap-2">
+            <div className="text-xs uppercase tracking-wide text-white/50">Adjust balance</div>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="number" step="0.01" min="0.01"
+                placeholder="Amount"
+                value={form.data.amount}
+                onChange={(e)=>form.setData('amount', e.target.value)}
+                className={inputClasses}
+              />
+              <button
+                onClick={apply}
+                disabled={form.processing}
+                className={buttonClasses}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+        {renderError('mt-1')}
+      </div>
+    );
+  }
 
   return (
     <tr className="border-t border-white/10">
@@ -378,17 +441,17 @@ function UserRowRunner({ user }) {
             placeholder="Amount"
             value={form.data.amount}
             onChange={(e)=>form.setData('amount', e.target.value)}
-            className="w-32 rounded-lg bg-white/5 border border-white/10 px-2 py-1.5"
+            className={inputClasses}
           />
           <button
             onClick={apply}
             disabled={form.processing}
-            className="px-3 py-1.5 rounded-lg bg-emerald-500 text-white text-sm font-semibold hover:brightness-110 disabled:opacity-60"
+            className={buttonClasses}
           >
             Save
           </button>
         </div>
-        {form.errors.amount && <div className="text-rose-300 text-xs mt-1">{form.errors.amount}</div>}
+        {renderError('mt-1')}
       </Td>
     </tr>
   );
@@ -432,68 +495,89 @@ function LogsRunner({ logs, users, assignedIds = [] }) {
       );
     });
   }, [scoped, q]);
+  const normalizedLogs = useMemo(() => {
+    return filtered.map((row) => {
+      const id = row.id ?? `${row.created_at}-${row.to_user_id}-${row.from_user_id}`;
+      const fromUser = row?.from_user ?? row?.fromUser ?? {};
+      const toUser   = row?.to_user   ?? row?.toUser   ?? {};
+      const amount   = Number(row?.amount ?? 0);
+      const dt = row?.created_at ? new Date(row.created_at) : null;
+      return {
+        id,
+        timestamp: dt ? dt.toLocaleString() : '-',
+        fromName: fromUser?.username ?? `#${row?.from_user_id ?? '-'}`,
+        toName: toUser?.username   ?? `#${row?.to_user_id ?? '-'}`,
+        amount,
+      };
+    });
+  }, [filtered]);
 
   return (
     <section className="space-y-6">
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h2 className="text-lg font-semibold">Logs</h2>
-        <div className="flex items-center gap-2">
+        <div className="w-full sm:w-auto flex flex-col gap-2 sm:flex-row sm:items-center">
           <input
             type="search"
             placeholder="Filter: user…"
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            className="rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
+            className="w-full sm:w-56 rounded-lg bg-white/5 border border-white/10 px-3 py-1.5 text-sm outline-none focus:ring-2 focus:ring-cyan-400"
           />
           <button
             onClick={() => router.reload({ only: ['logs'], preserveState: true, preserveScroll: true })}
-            className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10"
+            className="text-sm px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 hover:bg-white/10 w-full sm:w-auto"
           >
             Refresh
           </button>
         </div>
       </div>
 
-      <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
-        <table className="min-w-full text-sm">
-          <thead className="bg-white/5 text-white/80">
-            <tr>
-              <Th className="w-48">Time</Th>
-              <Th>From</Th>
-              <Th>To</Th>
-              <Th className="text-right w-32">Amount</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.map((row) => {
-              const id = row.id ?? `${row.created_at}-${row.to_user_id}-${row.from_user_id}`;
-              const fromUser = row?.from_user ?? row?.fromUser ?? {};
-              const toUser   = row?.to_user   ?? row?.toUser   ?? {};
-              const amount   = Number(row?.amount ?? 0);
-              const isPlus   = amount >= 0;
-              const dt = row?.created_at ? new Date(row.created_at) : null;
-              const when = dt ? dt.toLocaleString() : '-';
-              return (
-                <tr key={id} className="border-t border-white/10">
-                  <Td className="whitespace-nowrap">{when}</Td>
-                  <Td>{fromUser?.username ?? `#${row?.from_user_id ?? '-'}`}</Td>
-                  <Td>{toUser?.username   ?? `#${row?.to_user_id ?? '-'}`}</Td>
-                  <Td className="text-right font-mono">
-                    <span className={isPlus ? "text-emerald-300" : "text-rose-300"}>
-                      {isPlus ? "+" : ""}{amount.toFixed(2)}
-                    </span>
-                  </Td>
-                </tr>
-              );
-            })}
-            {filtered.length === 0 && (
-              <tr>
-                <td colSpan={4} className="p-4 text-center text-white/60">No records found.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {normalizedLogs.length > 0 ? (
+        <>
+          <div className="hidden lg:block">
+            <div className="overflow-x-auto no-scrollbar border border-white/10 rounded-xl">
+              <table className="min-w-full text-xs sm:text-sm">
+                <thead className="bg-white/5 text-white/80">
+                  <tr>
+                    <Th className="w-48">Time</Th>
+                    <Th>From</Th>
+                    <Th>To</Th>
+                    <Th className="text-right w-28">Amount</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {normalizedLogs.map((log) => {
+                    const isPlus = log.amount >= 0;
+                    return (
+                      <tr key={log.id} className="border-t border-white/10">
+                        <Td className="whitespace-nowrap">{log.timestamp}</Td>
+                        <Td>{log.fromName}</Td>
+                        <Td>{log.toName}</Td>
+                        <Td className="text-right font-mono">
+                          <span className={isPlus ? "text-emerald-300" : "text-rose-300"}>
+                            {isPlus ? "+" : ""}{log.amount.toFixed(2)}
+                          </span>
+                        </Td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="space-y-3 lg:hidden">
+            {normalizedLogs.map((log) => (
+              <RunnerLogCard key={log.id} log={log} />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="border border-white/10 rounded-xl bg-white/[0.04] p-4 text-center text-white/60">
+          No records found.
+        </div>
+      )}
 
       {Array.isArray(logs?.links) && logs.links.length > 0 && (
         <div className="flex flex-wrap gap-2">
@@ -512,6 +596,40 @@ function LogsRunner({ logs, users, assignedIds = [] }) {
   );
 }
 
+function RunnerLogCard({ log }) {
+  const positive = log.amount >= 0;
+  return (
+    <article className="rounded-2xl border border-white/10 bg-white/[0.05] p-4 space-y-3 text-sm">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-white/50">Time</div>
+          <div className="font-mono">{log.timestamp}</div>
+        </div>
+        <span
+          className={`px-3 py-1 rounded-lg border font-mono ${
+            positive
+              ? 'border-emerald-400/30 bg-emerald-500/10 text-emerald-200'
+              : 'border-rose-400/30 bg-rose-500/10 text-rose-200'
+          }`}
+        >
+          {positive ? '+' : ''}
+          {log.amount.toFixed(2)}
+        </span>
+      </div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <div className="text-xs uppercase tracking-wide text-white/50">From</div>
+          <div className="mt-1 font-semibold text-white truncate">{log.fromName}</div>
+        </div>
+        <div>
+          <div className="text-xs uppercase tracking-wide text-white/50">To</div>
+          <div className="mt-1 font-semibold text-white truncate">{log.toName}</div>
+        </div>
+      </div>
+    </article>
+  );
+}
+
 /* ------- Shared UI bits (borrowed from Welcome.jsx) ------- */
 function Alert({ tone='info', children }) {
   const map = {
@@ -521,8 +639,20 @@ function Alert({ tone='info', children }) {
   };
   return <div className={`rounded-xl border px-3 py-2 ${map[tone]}`}>{children}</div>;
 }
-function Th({ children, className='' }) { return <th className={`text-left p-2 font-semibold text-white ${className}`}>{children}</th>; }
-function Td({ children, className='' }) { return <td className={`p-2 align-middle text-white/80 ${className}`}>{children}</td>; }
+function Th({ children, className='' }) {
+  return (
+    <th className={`text-left px-2 py-2 font-semibold text-white text-xs sm:text-sm ${className}`}>
+      {children}
+    </th>
+  );
+}
+function Td({ children, className='' }) {
+  return (
+    <td className={`px-2 py-1.5 align-middle text-white/80 text-xs sm:text-sm ${className}`}>
+      {children}
+    </td>
+  );
+}
 function Avatar({ imgUrl, initials, status, size = 'md' }) {
   const sizeConfig = size === 'sm'
     ? { box: 'h-7 w-7', text: 'text-xs', indicator: 'h-2.5 w-2.5', offset: '-bottom-0.5 -right-0.5' }
