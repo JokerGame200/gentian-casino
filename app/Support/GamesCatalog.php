@@ -8,7 +8,7 @@ use Illuminate\Support\Str;
 
 class GamesCatalog
 {
-    public const ALLOWED_IMG_STYLES = ['game_img_1', 'game_img_2'];
+    public const ALLOWED_IMG_STYLES = ['game_img_1', 'game_img_2', 'game_img_5', 'game_img_6'];
 
     /**
      * Safely decode the upstream JSON response while logging malformed payloads.
@@ -47,8 +47,11 @@ class GamesCatalog
                     continue;
                 }
 
+                $resolvedId = self::resolveIdentifier($game);
+
                 $flat[] = [
-                    'id'         => (string) ($game['id'] ?? ''),
+                    'id'         => $resolvedId,
+                    'source_id'  => (string) ($game['id'] ?? ''),
                     'name'       => $game['name'] ?? '',
                     'img'        => $game['img'] ?? null,
                     'device'     => isset($game['device']) ? (int) $game['device'] : 2,
@@ -59,6 +62,7 @@ class GamesCatalog
                     'rewriterule'=> (int) ($game['rewriterule'] ?? 0),
                     'exitButton' => (int) ($game['exitButton'] ?? 0),
                     'aliases'    => $game['aliases'] ?? null,
+                    '_raw'       => $game,
                 ];
             }
         }
@@ -80,17 +84,24 @@ class GamesCatalog
             $game = self::normalizeGame($raw);
 
             $candidates = [];
-            if ($game['id'] !== '') {
+            $hasId = $game['id'] !== '';
+
+            if ($hasId) {
                 $candidates[] = 'id:' . $game['id'];
+            } else {
+                if ($game['_provider_norm'] !== '' && $game['_name_norm'] !== '') {
+                    $candidates[] = 'provname:' . $game['_provider_norm'] . '#' . $game['_name_norm'];
+                }
+                if ($game['_img_key'] !== '') {
+                    $candidates[] = 'img:' . $game['_img_key'];
+                }
             }
-            if ($game['_provider_norm'] !== '' && $game['_name_norm'] !== '') {
-                $candidates[] = 'provname:' . $game['_provider_norm'] . '#' . $game['_name_norm'];
-            }
+
             if (!$candidates) {
                 $candidates[] = 'hash:' . md5(
                     ($game['name'] ?? '') . '|' .
                     ($game['provider'] ?? '') . '|' .
-                    ($game['img'] ?? '')
+                    ($game['_img_key'] ?? '')
                 );
             }
 
@@ -111,13 +122,24 @@ class GamesCatalog
                 $buckets[$bucketKey] = $game;
             }
 
-            foreach ($candidates as $candidateKey) {
+            $aliasKeys = $candidates;
+            if ($hasId) {
+                $aliasKeys = array_values(array_filter(
+                    $aliasKeys,
+                    static fn($candidateKey) => Str::startsWith($candidateKey, 'id:')
+                ));
+                if (!in_array($bucketKey, $aliasKeys, true)) {
+                    $aliasKeys[] = $bucketKey;
+                }
+            }
+
+            foreach ($aliasKeys as $candidateKey) {
                 $aliases[$candidateKey] = $bucketKey;
             }
         }
 
         return array_values(array_map(function (array $game) {
-            unset($game['_name_norm'], $game['_provider_norm'], $game['_img_key']);
+            unset($game['_name_norm'], $game['_provider_norm'], $game['_img_key'], $game['_raw']);
             return $game;
         }, $buckets));
     }
@@ -143,6 +165,33 @@ class GamesCatalog
             '_provider_norm' => $providerNorm,
             '_img_key' => $imgKey,
         ];
+    }
+
+    private static function resolveIdentifier(array $game): string
+    {
+        $candidates = [
+            $game['id'] ?? null,
+            $game['game_id'] ?? null,
+            $game['uid'] ?? null,
+            $game['uuid'] ?? null,
+            $game['sys_id'] ?? null,
+            $game['code'] ?? null,
+            $game['key'] ?? null,
+            $game['slug'] ?? null,
+            $game['external_id'] ?? null,
+        ];
+
+        foreach ($candidates as $value) {
+            if ($value === null) {
+                continue;
+            }
+            $string = trim((string) $value);
+            if ($string !== '') {
+                return $string;
+            }
+        }
+
+        return '';
     }
 
     private static function normalizeNamePart(?string $value): string

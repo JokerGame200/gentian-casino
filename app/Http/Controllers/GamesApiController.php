@@ -7,6 +7,7 @@ use App\Models\GameSession;
 use App\Models\GameTransaction;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -40,6 +41,22 @@ class GamesApiController extends Controller
             ];
             if ($cdn = (string) config('gamesapi.cdn_url')) {
                 $payload['cdnUrl'] = $cdn;
+            }
+
+            $cacheTtl = max(0, (int) config('gamesapi.list_cache_seconds', 3600));
+            $cacheKey = 'gamesapi:list:' . md5(json_encode([
+                'v'   => 2,
+                'img' => $imgStyle,
+                'cdn' => $payload['cdnUrl'] ?? null,
+            ], JSON_THROW_ON_ERROR));
+
+            if ($cacheTtl > 0 && !$request->boolean('refresh')) {
+                $cached = Cache::get($cacheKey);
+                if (is_array($cached)) {
+                    $cachedResponse = $cached;
+                    $cachedResponse['cached'] = true;
+                    return response()->json($cachedResponse);
+                }
             }
 
             // WICHTIG: Upstream erwartet x-www-form-urlencoded, NICHT JSON
@@ -80,13 +97,24 @@ class GamesApiController extends Controller
             }
 
             $flat = GamesCatalog::flattenContent($content);
+            $rawTotal = count($flat);
             $flat = GamesCatalog::dedupe($flat);
+            $dedupedTotal = count($flat);
             usort($flat, fn($a,$b) => [$a['provider'],$a['name']] <=> [$b['provider'],$b['name']]);
 
-            return response()->json([
+            $responsePayload = [
                 'status' => 'success',
                 'games'  => $flat,
-            ]);
+                'fetched_at' => Carbon::now()->toIso8601String(),
+                'raw_total' => $rawTotal,
+                'deduped_total' => $dedupedTotal,
+            ];
+
+            if ($cacheTtl > 0) {
+                Cache::put($cacheKey, $responsePayload, $cacheTtl);
+            }
+
+            return response()->json($responsePayload);
         } catch (\Throwable $e) {
             // Alles andere sauber als 500 zurück, inkl. Log
             Log::error('GAMES list SERVER EX', [
@@ -651,6 +679,9 @@ class GamesApiController extends Controller
             $bet = (float) ($data['bet'] ?? 0);
             $win = (float) ($data['win'] ?? 0);
 
+            $rawBetInfo = $data['betInfo'] ?? $data['bet_info'] ?? null;
+            $skipBalanceGuard = $this->hasRefundFlag($rawBetInfo);
+
             $tradeId = $this->normalizeString($data['tradeId'] ?? $data['trade_id'] ?? null);
             $existingTransaction = null;
             if ($tradeId) {
@@ -680,7 +711,7 @@ class GamesApiController extends Controller
             }
 
             $current = (float) ($user->balance ?? 0);
-            if ($bet > 0 && $current + 1e-9 < $bet) {
+            if (!$skipBalanceGuard && $bet > 0 && $current + 1e-9 < $bet) {
                 Log::warning('GAMES writeBet FAIL_BALANCE', ['login'=>$login,'have'=>$current,'need'=>$bet]);
                 return response()->json(['status'=>'fail','error'=>'fail_balance']);
             }
@@ -714,7 +745,7 @@ class GamesApiController extends Controller
             $sessionClosedAt = $this->parseDateTimeValue($data['sessionClosedAt'] ?? $data['session_closed_at'] ?? null);
 
             $action = $this->normalizeString($data['action'] ?? $data['type'] ?? $data['gameAction'] ?? ($data['cmd'] ?? null));
-            $betInfo = $this->encodeToJsonString($data['betInfo'] ?? $data['bet_info'] ?? null);
+            $betInfo = $this->encodeToJsonString($rawBetInfo);
             $matrix = $this->encodeToJsonString($data['matrix'] ?? null);
             $winLines = $this->encodeToJsonString($data['winLines'] ?? $data['win_lines'] ?? null);
 
@@ -857,6 +888,28 @@ class GamesApiController extends Controller
                 'currency' => $currency,
             ]);
         });
+    }
+
+    private function hasRefundFlag(mixed $betInfo): bool
+    {
+        if ($betInfo === null) {
+            return false;
+        }
+        if (is_string($betInfo)) {
+            return stripos($betInfo, 'refund') !== false;
+        }
+        if (is_array($betInfo)) {
+            foreach ($betInfo as $value) {
+                if ($this->hasRefundFlag($value)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (is_object($betInfo)) {
+            return $this->hasRefundFlag(get_object_vars($betInfo));
+        }
+        return false;
     }
 
     private function normalizeBoolean(mixed $value): ?bool

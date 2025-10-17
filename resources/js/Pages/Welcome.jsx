@@ -270,19 +270,53 @@ function usePrefetchImages(games, options = {}) {
     }
   }, [games, range?.start, range?.end, buffer, onlyIOS, queueImage]);
 }
-const buildKeyCandidates = (g) => {
+const buildImageKey = (value) => {
+  const raw = typeof value === 'string' ? value : String(value ?? '');
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  const lower = trimmed.toLowerCase();
+  if (lower.startsWith('http://') || lower.startsWith('https://')) {
+    return lower.replace(/^https?:\/\//, '').split(/[?#]/)[0].replace(/^\/+/, '');
+  }
+  if (lower.startsWith('//')) {
+    return lower.slice(2).split(/[?#]/)[0].replace(/^\/+/, '');
+  }
+  return lower.replace(/^[./]+/, '');
+};
+const buildKeyCandidates = (g, img) => {
   const idCands = [g?.uid, g?.uuid, g?.game_id, g?.sys_id, g?.id, g?.slug, g?.code, g?.key, g?.external_id].filter(v => v != null);
   const idStrings = idCands
     .map((v) => String(v).trim())
     .filter((v) => v.length > 0);
   const nameN = normalizeName(getName(g));
   const provN = stableProvider(getProvider(g));
-  const keys = [
-    ...idStrings.map(v => `id:${v}`),
-    (provN && nameN) ? `provname:${provN}#${nameN}` : null,
-    nameN ? `name:${nameN}` : null,
-  ].filter(Boolean);
-  return { keys, nameN, provN, ids: idStrings };
+  const keys = [];
+
+  if (idStrings.length > 0) {
+    idStrings.forEach((value) => keys.push(`id:${value}`));
+  } else {
+    if (provN && nameN) {
+      keys.push(`provname:${provN}#${nameN}`);
+    }
+    if (nameN) {
+      keys.push(`name:${nameN}`);
+    }
+    if (provN) {
+      keys.push(`provider:${provN}`);
+    }
+    const imgKey = buildImageKey(img);
+    if (imgKey) {
+      keys.push(`img:${imgKey}`);
+    }
+  }
+
+  if (keys.length === 0) {
+    const fallback = `${provN || ''}|${nameN || ''}|${String(img || '').toLowerCase()}`;
+    keys.push(`hash:${fallback}`);
+  }
+
+  const uniqueKeys = [...new Set(keys)];
+  return { keys: uniqueKeys, nameN, provN, ids: idStrings };
 };
 const hasBetterThumb = (a, b) => {
   const ia = String(a?.img || ''), ib = String(b?.img || '');
@@ -297,7 +331,7 @@ function normalizeAndDedupe(list) {
     const name = String(getName(raw) || '').trim();
     const provider = String(getProvider(raw) || '').trim();
     const img = pickImage(raw);
-    const { keys, nameN, provN, ids } = buildKeyCandidates(raw);
+    const { keys, nameN, provN, ids } = buildKeyCandidates(raw, img);
     const nameLower = name.toLowerCase();
     const providerLower = provider.toLowerCase();
     const idSearchTerms = Array.isArray(ids) ? ids.map((id) => id.toLowerCase()) : [];

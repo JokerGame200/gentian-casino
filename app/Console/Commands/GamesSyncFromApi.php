@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class GamesSyncFromApi extends Command
 {
@@ -60,10 +61,7 @@ class GamesSyncFromApi extends Command
         $knownIds = [];
 
         foreach ($games as $raw) {
-            $gameId = (string) ($raw['id'] ?? '');
-            if ($gameId === '') {
-                continue;
-            }
+            $gameId = $this->resolveGameId($raw);
             $knownIds[] = $gameId;
 
             $payload = [
@@ -182,5 +180,53 @@ class GamesSyncFromApi extends Command
             return $allowed[0];
         }
         return $value;
+    }
+
+    private function resolveGameId(array $raw): string
+    {
+        $candidate = trim((string) ($raw['id'] ?? ''));
+        if ($candidate !== '') {
+            return $candidate;
+        }
+
+        $fallbacks = [
+            $raw['source_id'] ?? null,
+            $raw['game_id'] ?? null,
+            $raw['uid'] ?? null,
+            $raw['uuid'] ?? null,
+            $raw['sys_id'] ?? null,
+            $raw['code'] ?? null,
+            $raw['key'] ?? null,
+            $raw['slug'] ?? null,
+            $raw['external_id'] ?? null,
+        ];
+
+        foreach ($fallbacks as $value) {
+            if ($value === null) {
+                continue;
+            }
+            $string = trim((string) $value);
+            if ($string !== '') {
+                return $string;
+            }
+        }
+
+        if (!empty($raw['aliases']) && is_array($raw['aliases'])) {
+            foreach ($raw['aliases'] as $alias) {
+                $aliasString = trim((string) $alias);
+                if ($aliasString !== '') {
+                    return $aliasString;
+                }
+            }
+        }
+
+        $provider = trim((string) ($raw['provider'] ?? ''));
+        $name = trim((string) ($raw['name'] ?? ''));
+        if ($provider !== '' || $name !== '') {
+            $hashBase = mb_strtolower($provider . '::' . $name);
+            return 'hash:' . substr(hash('sha256', $hashBase), 0, 24);
+        }
+
+        return (string) Str::uuid();
     }
 }
